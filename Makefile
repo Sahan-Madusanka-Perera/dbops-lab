@@ -6,7 +6,7 @@ export
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs replication oracle mariadb mariadb-replica mongo psql reset
+.PHONY: help up down ps logs replication monitor-users install health test test-live oracle mariadb mariadb-replica mongo psql reset
 
 help: ## List the commands
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -14,6 +14,7 @@ help: ## List the commands
 up: .env ## Start every engine, wait until each is healthy, initiate the Mongo replica set
 	$(COMPOSE) up -d --wait --wait-timeout 600
 	$(COMPOSE) run --rm mongo-init
+	scripts/create-monitor-users.sh
 
 down: ## Stop the lab, keep the data
 	$(COMPOSE) down
@@ -26,6 +27,22 @@ logs: ## Follow logs; pick one with: make logs s=oracle
 
 replication: ## Seed the MariaDB replica from the primary and start GTID replication
 	scripts/mariadb/setup-replication.sh
+
+monitor-users: ## Create or update the read-only dbops_monitor account in each engine
+	scripts/create-monitor-users.sh
+
+install: ## Create .venv and install the dbops CLI with its test tools
+	python3 -m venv .venv
+	.venv/bin/pip install -q -e ".[dev]"
+
+health: ## Health of every instance (exit 0 OK, 1 WARN, 2 CRIT, 3 UNKNOWN)
+	.venv/bin/dbops health
+
+test: ## Unit tests, no databases needed
+	.venv/bin/pytest -q
+
+test-live: ## Tests against the running lab
+	DBOPS_LIVE=1 .venv/bin/pytest -q tests/test_live.py
 
 oracle: ## SQL*Plus into FREEPDB1 as SHOP
 	docker exec -it dbops-oracle sqlplus -L "shop/$(ORACLE_APP_PASSWORD)@FREEPDB1"

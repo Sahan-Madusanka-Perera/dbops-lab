@@ -19,7 +19,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 [[ -f .env ]] || { echo "error: .env not found; run: cp .env.example .env" >&2; exit 2; }
-set -a; source .env; set +a
+set -a
+# shellcheck source=/dev/null  # .env is local and git-ignored
+source .env
+set +a
 
 PRIMARY=dbops-mariadb-primary
 REPLICA=dbops-mariadb-replica
