@@ -21,6 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck scripts/*.sh scripts/*/*.sh
+        run: shellcheck -x scripts/*.sh scripts/*/*.sh
       - name: compose file is valid
         run: cp .env.example .env && docker compose config --quiet

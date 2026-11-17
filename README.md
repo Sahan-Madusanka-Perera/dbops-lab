@@ -18,6 +18,7 @@ make up                 # Oracle, MariaDB x2, MongoDB x3, PostgreSQL
 make replication        # seed the MariaDB replica, start GTID replication
 make install            # the dbops CLI, in .venv
 make health             # one verdict for all seven instances
+make backup             # back up and restore-test all four engines
 make                    # list every command
 ```
 
@@ -49,6 +50,30 @@ Measured output is in [results/](results/): a healthy run, and a run with four
 faults injected (stopped replica SQL thread, stopped Mongo member, an Oracle row
 lock, long queries), each caught with the blocker and the wait event named.
 
+## Backups and restore tests (M3)
+
+A backup counts once it has been restored and checked against its source.
+`make backup` takes one per engine, restores each into a throwaway container and
+compares the data, then records the result in `backups/<engine>/<id>/manifest.json`:
+
+| Engine | Backup, taken from | Restore test |
+|---|---|---|
+| Oracle | RMAN `BACKUP DATABASE PLUS ARCHIVELOG`, compressed, with control file + spfile autobackup | `RESTORE ... VALIDATE`, then a full restore onto an **empty** container: spfile and control file from the autobackup, `RESTORE`, `RECOVER` to the backup's SCN, `OPEN RESETLOGS`. Each SHOP table's row count and `ORA_HASH` is compared with the source `AS OF` that SCN |
+| MariaDB | `mariadb-backup --slave-info`, prepared, from the **replica** | a fresh MariaDB started on a copy of the data dir; row count + `CHECKSUM TABLE` per table |
+| MongoDB | `mongodump --oplog`, from a **secondary** | `mongorestore --oplogReplay` into a fresh mongod; count + `dbHash` per collection |
+| PostgreSQL | `pg_dump -Fc` + `pg_dumpall --globals-only` | `pg_restore` into a fresh postgres; count + md5 of the rows per table |
+
+```bash
+make backup              # all four; one engine: make backup e=oracle
+make backups             # every backup on disk and its restore test result
+```
+
+`dbops health` reports the newest backup that **passed** its restore test per
+engine: WARN after 26 h, CRIT after 50 h, CRIT at once if the newest one failed.
+Measured: Oracle backs up in about 45 s (465 MB) and restores in about 2.5 min;
+the others take seconds. A backup piece with 4 KB overwritten is caught by
+`RESTORE VALIDATE` ([results/m3-oracle-corrupt-piece.txt](results/m3-oracle-corrupt-piece.txt)).
+
 Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## Milestones
@@ -57,7 +82,7 @@ Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.m
 |---|---|---|---|
 | M1 | Lab stack | `feat/m1-lab-stack` | Oracle 23ai Free, MariaDB primary + replica (GTID), a 3-node MongoDB replica set and PostgreSQL with `pg_stat_statements`, all in one Compose file |
 | M2 | Health checks | `feat/m2-health-checks` | `dbops health`: CPU, memory, storage, connections, replication lag, Oracle tablespaces and long sessions, as text or `--json` |
-| M3 | Backup and restore validation | `feat/m3-backup-restore` | RMAN backup + `RESTORE VALIDATE`, mariabackup, mongodump and pg_dump, each restored into a scratch instance and compared |
+| M3 | Backup and restore validation | `feat/m3-backup-restore` | RMAN, mariadb-backup, mongodump and pg_dump, each restored into an empty container and compared with the source |
 | M4 | Slow queries | `feat/m4-slow-queries` | The worst queries from the MariaDB slow log, the Mongo profiler, `pg_stat_statements` and Oracle `V$SQL`, ranked, with index suggestions |
 | M5 | Access review | `feat/m5-access-review` | Every user, role and privilege across the four engines, plus unused accounts and password age, as an evidence report |
 | M6 | Ansible provisioning | `feat/m6-ansible-provisioning` | MariaDB and the M2/M3 jobs as systemd timers on a Linux VM |
@@ -67,7 +92,8 @@ Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.m
 
 ```
 engines/     one folder per database engine: config and init scripts the containers mount
-scripts/     shell scripts for operations (replication setup, backups), grouped by engine
+scripts/     shell scripts for operations, grouped by engine; backup/ has one script per engine
+backups/     where backups land (git-ignored), one folder per engine
 dbops/       the Python CLI: health (M2); backup verification, slow queries, access review to come
 tests/       unit tests (no databases needed) and live tests against the lab
 drills/      scripts that cause an incident on purpose (M7)

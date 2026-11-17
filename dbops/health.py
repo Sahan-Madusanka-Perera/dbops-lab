@@ -6,6 +6,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 
+from .backups import backup_checks
 from .config import ENGINES, Target, targets as all_targets
 from .host import docker_stats, host_checks
 from .model import Check, Status
@@ -28,7 +29,10 @@ def collect(engines: list[str] | None = None, env: dict | None = None) -> list[C
             stats = None
             stats_error = str(e).strip()[:120] or "docker stats failed"
 
-    # Per instance: reachable, then cpu / memory / storage, then the engine's own checks.
+    backups = {c.target: c for c in backup_checks(list(by_engine))}
+
+    # Per instance: reachable, then cpu / memory / storage, then the engine's own checks,
+    # then its last verified backup if backups are taken from it.
     ordered: list[Check] = []
     for tg in chosen:
         own = [c for c in engine_checks if c.target == tg.name]
@@ -38,6 +42,8 @@ def collect(engines: list[str] | None = None, env: dict | None = None) -> list[C
         else:
             ordered += host_checks(tg, stats)
         ordered += [c for c in own if c.name != "reachable"]
+        if tg.name in backups:
+            ordered.append(backups[tg.name])
 
     # Checks about a group rather than one instance (the Mongo replica set) go last.
     names = {tg.name for tg in chosen}
