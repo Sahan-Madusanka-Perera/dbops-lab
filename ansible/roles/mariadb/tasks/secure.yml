@@ -1,0 +1,15 @@
+---
+# What mariadb-secure-installation does, as idempotent tasks. root@localhost logs in
+# through unix_socket (only the OS root user), so it needs no password at all.
+- name: Remove anonymous accounts
+  community.mysql.mysql_user:
+    name: ""
+    host_all: true
+    state: absent
+    login_unix_socket: "{{ mariadb_socket }}"
+
+- name: Remove the test database
+  community.mysql.mysql_db:
+    name: test
+    state: absent
+    login_unix_socket: "{{ mariadb_socket }}"

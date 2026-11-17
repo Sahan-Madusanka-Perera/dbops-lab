@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+[Unit]
+Description=dbops alert: %i failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dbops-alert %i

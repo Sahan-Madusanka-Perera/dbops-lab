@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Run dbops health every {{ dbops_jobs_health_interval }}
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ dbops_jobs_health_interval }}
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,69 @@
+cd ansible && ANSIBLE_CONFIG=ansible.cfg ../.venv/bin/ansible-playbook playbooks/verify.yml
+[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.
+[DEPRECATION WARNING]: DEFAULT_MANAGED_STR option. Reason: The `ansible_managed` variable can be set just like any other variable, or a different variable can be used.
+Alternatives: Set the `ansible_managed` variable, or use any custom variable in templates. This feature will be removed from ansible-core version 2.23.
+
+
+PLAY [Verify the dbops jobs on the database servers] ***************************
+
+TASK [Run the backup job now (a oneshot unit, so this waits for it to finish)] ***
+changed: [db-vm1]
+
+TASK [Read what the backup job logged] *****************************************
+ok: [db-vm1]
+
+TASK [Run dbops health as the timer does] **************************************
+ok: [db-vm1]
+
+TASK [List the backups on the server] ******************************************
+ok: [db-vm1]
+
+TASK [List the dbops timers] ***************************************************
+ok: [db-vm1]
+
+TASK [Show the results] ********************************************************
+ok: [db-vm1] => 
+    msg:
+        backup:
+        - "customers\t5000 rows, checksum 2095258238\t5000 rows, checksum 2095258238\ttrue"
+        - "orders\t50000 rows, checksum 3581674677\t50000 rows, checksum 3581674677\ttrue"
+        - 'verify PASSED in 3s: 2 tables, as of GTID 0-11-12'
+        - 'dbops-mariadb-backup.service: Deactivated successfully.'
+        - 'Finished dbops-mariadb-backup.service - dbops: back up MariaDB with mariadb-backup
+            and test the restore.'
+        - 'dbops-mariadb-backup.service: Consumed 1.429s CPU time.'
+        backups:
+        - engine    backup               size  verify  position
+        - mariadb   20261117T160908Z    60 MB  PASSED  GTID 0-11-12
+        health:
+        - DBOps health  2026-11-17 16:09:14
+        - ''
+        - db-vm1
+        - '  OK      reachable                                 MariaDB 11.4.14-MariaDB-ubu2404-log,'
+        - '  OK      cpu                        1.8%'
+        - '  OK      memory                     39.7%          3.0 GB of 7.7 GB'
+        - '  OK      storage                    4.0%           /var/lib/mysql: 16.7 GB
+            of 452.1 GB'
+        - '  OK      connections                0.5%           1 of 200'
+        - '  OK      long-running (>60s)        0'
+        - '  OK      last verified backup       0.0h           20261117T160908Z, 60 MB,
+            GTID 0-11-12'
+        - ''
+        - OK      7 OK, 0 WARN, 0 CRIT, 0 UNKNOWN
+        timers:
+        - NEXT                           LEFT LAST                         PASSED UNIT                       ACTIVATES
+        - Tue 2026-11-17 16:13:20 UTC 4min 5s Tue 2026-11-17 16:08:20 UTC 54s ago dbops-health.timer         dbops-health.service
+        - Wed 2026-11-18 02:36:19 UTC     10h -                                 - dbops-mariadb-backup.timer
+            dbops-mariadb-backup.service
+        - ''
+        - 2 timers listed.
+        - Pass --all to see loaded but inactive timers, too.
+
+TASK [The newest backup passed its restore test and health sees it] ************
+ok: [db-vm1] => 
+    changed: false
+    msg: All assertions passed
+
+PLAY RECAP *********************************************************************
+db-vm1                     : ok=7    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+

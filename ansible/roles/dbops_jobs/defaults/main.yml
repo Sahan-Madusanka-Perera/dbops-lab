@@ -1,0 +1,17 @@
+---
+dbops_jobs_home: /opt/dbops
+dbops_jobs_backup_dir: /var/backups/dbops
+dbops_jobs_health_interval: 5min
+dbops_jobs_backup_time: "*-*-* 02:30:00"
+dbops_jobs_backup_keep: 3
+dbops_jobs_backup_min_free_gb: 1
+dbops_jobs_monitor_password: ""
+
+# What dbops health checks on this server: written to /etc/dbops/targets.toml
+dbops_jobs_targets:
+  - name: "{{ inventory_hostname }}"
+    engine: mariadb
+    host: 127.0.0.1
+    port: 3306
+    data_dir: /var/lib/mysql
+    backups: true

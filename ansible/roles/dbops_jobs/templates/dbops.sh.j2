@@ -1,0 +1,9 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# dbops with this server's settings. Needs to read /etc/dbops: run with sudo,
+# or as a member of the dbops group.
+set -a
+# shellcheck source=/dev/null  # written by Ansible, readable by root and the dbops group
+. /etc/dbops/dbops.env
+set +a
+exec {{ dbops_jobs_home }}/venv/bin/dbops "$@"

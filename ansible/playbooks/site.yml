@@ -1,0 +1,26 @@
+---
+# Build a database server from a bare Ubuntu host: base setup, MariaDB, and the
+# dbops health and backup jobs as systemd timers. Safe to re-run: a second run
+# changes nothing (make vm-provision runs it twice to prove it).
+
+- name: Build the dbops wheel to install on the servers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [dbops]
+  tasks:
+    - name: Build the wheel for this version of dbops
+      ansible.builtin.command:
+        cmd: uv build --wheel --out-dir {{ dbops_build_dir }} {{ dbops_repo_root }}
+        creates: "{{ dbops_build_dir }}/{{ dbops_wheel }}"
+
+- name: Database servers
+  hosts: dbservers
+  become: true
+  roles:
+    - role: common
+      tags: [common]
+    - role: mariadb
+      tags: [mariadb]
+    - role: dbops_jobs
+      tags: [dbops]

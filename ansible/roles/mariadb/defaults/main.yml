@@ -1,0 +1,15 @@
+---
+mariadb_version: "11.4"
+mariadb_server_id: 1
+mariadb_innodb_buffer_pool_size: 128M
+mariadb_max_connections: 200
+mariadb_bind_address: 0.0.0.0
+mariadb_open_files_limit: 65535
+mariadb_binlog_expire_seconds: 259200       # 3 days
+mariadb_socket: /run/mysqld/mysqld.sock
+
+# Created from engines/mariadb/primary/init/01-shop-schema.sql on the first run only
+mariadb_shop_schema: "{{ dbops_repo_root }}/engines/mariadb/primary/init/01-shop-schema.sql"
+
+mariadb_app_password: ""
+mariadb_monitor_password: ""

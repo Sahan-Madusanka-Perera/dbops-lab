@@ -1,0 +1,4 @@
+Version: 0.3.1
+health unit with MariaDB stopped: exit-code
+alert: 2026-11-17T16:10:12Z dbops-health.service failed:  CRIT reachable (2003, "Can't connect to MySQL server on '127.0.0.1' ([Errno 111] Connection refused)");CRIT 4 OK, 0 WARN, 1 CRIT, 0 UNKNOWN
+after restart: success

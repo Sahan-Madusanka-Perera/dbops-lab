@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Called by dbops-alert@<unit>.service when a dbops job fails: an error in the
+# journal (journalctl -t dbops-alert) and a line in /var/log/dbops-alerts.log.
+# In production this is where someone gets paged (PagerDuty, Opsgenie, a chat webhook).
+set -euo pipefail
+unit="$1"
+# Only the run that failed, and only the lines that say why.
+run=$(systemctl show -p InvocationID --value "$unit")
+lines=$(journalctl "_SYSTEMD_INVOCATION_ID=$run" -o cat --no-pager \
+  | grep -E '^ *(CRIT|UNKNOWN) |FAILED|[Ee]rror|GB free' | sed 's/  */ /g' | head -n 5 | paste -sd ';' -)
+[[ -n "$lines" ]] || lines=$(journalctl -u "$unit" -n 3 -o cat --no-pager | paste -sd ';' -)
+msg="$(date -u +%Y-%m-%dT%H:%M:%SZ) $unit failed: ${lines:0:600}"
+echo "$msg" >> /var/log/dbops-alerts.log
+logger -t dbops-alert -p daemon.err "$msg"

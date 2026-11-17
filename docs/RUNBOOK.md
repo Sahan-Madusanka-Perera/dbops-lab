@@ -162,7 +162,37 @@ make access a=--markdown > results/access-$(date +%F).md    # the evidence repor
 Rotate a password: change it in `.env`, then `make accounts`, then restart whatever
 uses it. `make accounts` resets every approved account to `.env`.
 
-### 2.9 Start again from empty
+### 2.9 The database server db-vm1 (M6)
+
+Needs Terraform. `make install` also installs Ansible into `.venv`.
+
+```bash
+make vm-up            # create the host (terraform apply)
+make vm-provision     # configure it; run it again any time, it changes only what drifted
+make vm-check         # what a run would change, with diffs, changing nothing
+make vm-verify        # run the backup and health jobs now
+make vm-ssh           # log in as ansible
+make vm-down          # delete the host and its disks (asks first)
+```
+
+On the server:
+
+```bash
+sudo dbops health                                   # what the timer runs
+sudo dbops backups
+systemctl list-timers 'dbops-*'
+journalctl -u dbops-health -u dbops-mariadb-backup --since today
+sudo tail /var/log/dbops-alerts.log                 # every failed job
+sudo systemctl start dbops-mariadb-backup           # back up now
+```
+
+Roll out a dbops change: bump `version` in `pyproject.toml`, then `make vm-provision`.
+The wheel is built once per version, so without a bump the servers keep the old one.
+
+Rotate a password: change it in `.env`, then `make vm-provision` (the accounts and
+`/etc/dbops/dbops.env` are rewritten from it).
+
+### 2.10 Start again from empty
 
 ```bash
 make reset    # deletes every volume; asks first
@@ -170,6 +200,25 @@ make up && make replication
 ```
 
 ## 3. Troubleshooting
+
+### `make vm-provision` changed sshd_config but sshd still accepts passwords
+
+A run failed after the config was written, and the `Restart ssh` handler never ran.
+`ansible.cfg` has `force_handlers = True` so that a failed run still runs the handlers
+it queued; for a host provisioned before that, restart by hand:
+`cd ansible && ../.venv/bin/ansible dbservers -b -m systemd_service -a "name=ssh state=restarted"`.
+Check: `ssh -o PubkeyAuthentication=no -p 2222 ansible@127.0.0.1` must say `Permission denied (publickey)`.
+
+### db-vm1 says memory and disk are those of the whole Docker VM
+
+It is a container: `/proc/meminfo` and `df` show Docker Desktop's VM, not the 1 GB
+limit. That is why the buffer pool is set in `group_vars/dbservers.yml` instead of
+being computed from `ansible_memtotal_mb`. On a real VM both are right.
+
+### `systemctl is-system-running` on db-vm1 says `degraded`
+
+`systemctl --failed` names the unit. In a container, units that need a real kernel
+(udev, kernel modules) are masked in the image; anything else is a real failure.
 
 ### MongoDB says `requires authentication` or `Authentication failed`
 

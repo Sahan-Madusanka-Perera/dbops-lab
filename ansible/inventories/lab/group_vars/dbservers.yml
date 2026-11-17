@@ -1,0 +1,18 @@
+---
+# Settings for every database server. Role defaults (roles/*/defaults) hold the rest.
+
+mariadb_version: "11.4"
+# The host is a 1 GB container: /proc/meminfo shows Docker's whole VM, not the
+# limit, so the buffer pool is set here rather than computed from ansible_memtotal_mb.
+mariadb_innodb_buffer_pool_size: 256M
+mariadb_server_id: 11
+
+# Passwords come from the lab's .env (make exports it), the same as every other
+# tool here. In production: Ansible Vault or a secrets manager lookup.
+mariadb_app_password: "{{ lookup('ansible.builtin.env', 'APP_PASSWORD') }}"
+mariadb_monitor_password: "{{ lookup('ansible.builtin.env', 'MONITOR_PASSWORD') }}"
+dbops_jobs_monitor_password: "{{ mariadb_monitor_password }}"
+
+dbops_jobs_health_interval: 5min
+dbops_jobs_backup_time: "*-*-* 02:30:00"
+dbops_jobs_backup_keep: 3          # prepared backups are uncompressed (~70 MB each here)

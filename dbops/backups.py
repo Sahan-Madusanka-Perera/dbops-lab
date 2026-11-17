@@ -17,7 +17,8 @@ from .model import Check, Status, grade
 
 BACKUP_ROOT = REPO_ROOT / "backups"
 
-# Which instance each engine's backups are taken from (and reported against).
+# Which instance each engine's backups are taken from (and reported against), in the lab.
+# Elsewhere the targets file says, with backups = true (see config.py).
 SOURCE_TARGET = {"oracle": "oracle", "mariadb": "mariadb-replica", "mongo": "mongo2", "postgres": "postgres"}
 
 
@@ -59,12 +60,14 @@ def list_backups(root: Path = BACKUP_ROOT) -> dict[str, list[Backup]]:
     return found
 
 
-def backup_checks(engines: list[str], now: datetime | None = None, root: Path = BACKUP_ROOT) -> list[Check]:
+def backup_checks(engines: list[str], now: datetime | None = None, root: Path = BACKUP_ROOT,
+                  sources: dict[str, str] | None = None) -> list[Check]:
     now = now or datetime.now(timezone.utc)
     found = list_backups(root)
+    sources = SOURCE_TARGET if sources is None else sources
     checks = []
     for engine in engines:
-        target = SOURCE_TARGET.get(engine)
+        target = sources.get(engine)
         if target is None:
             continue
         backups = found.get(engine, [])

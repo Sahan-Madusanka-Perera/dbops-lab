@@ -1,0 +1,58 @@
+---
+- name: Add the official MariaDB repository for {{ mariadb_version }}
+  ansible.builtin.deb822_repository:
+    name: mariadb
+    types: deb
+    uris: "https://dlm.mariadb.com/repo/mariadb-server/{{ mariadb_version }}/repo/ubuntu"
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: main
+    architectures: "{{ 'arm64' if ansible_facts.architecture == 'aarch64' else 'amd64' }}"
+    signed_by: https://supplychain.mariadb.com/mariadb-keyring-2019.gpg
+
+- name: Install MariaDB server, client and mariadb-backup
+  ansible.builtin.apt:
+    name: [mariadb-server, mariadb-client, mariadb-backup]
+    state: present
+    update_cache: true
+
+- name: Configure MariaDB
+  ansible.builtin.template:
+    src: 60-dbops.cnf.j2
+    dest: /etc/mysql/mariadb.conf.d/60-dbops.cnf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mariadb
+
+- name: Create the drop-in directory for the mariadb unit
+  ansible.builtin.file:
+    path: /etc/systemd/system/mariadb.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Raise the open files limit for mariadbd
+  ansible.builtin.template:
+    src: mariadb-limits.conf.j2
+    dest: /etc/systemd/system/mariadb.service.d/10-dbops-limits.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mariadb
+
+- name: Start MariaDB now and at boot
+  ansible.builtin.systemd_service:
+    name: mariadb
+    state: started
+    enabled: true
+
+# Config and limits must be live before the database is touched.
+- name: Apply pending restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Secure the installation
+  ansible.builtin.import_tasks: secure.yml
+
+- name: Create the shop schema and accounts
+  ansible.builtin.import_tasks: shop.yml

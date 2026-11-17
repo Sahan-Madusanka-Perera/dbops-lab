@@ -1,7 +1,7 @@
 [project]
 name = "dbops"
-version = "0.2.0"
-description = "Operations toolkit for the DBOps Lab: health checks across Oracle, MariaDB, MongoDB and PostgreSQL"
+version = "0.3.1"
+description = "Operations toolkit for the DBOps Lab: health, backups, slow queries and access reviews across Oracle, MariaDB, MongoDB and PostgreSQL"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+ops = ["ansible-core>=2.17", "ansible-lint>=24"]   # M6: provisioning db-vm1
 
 [project.scripts]
 dbops = "dbops.cli:main"

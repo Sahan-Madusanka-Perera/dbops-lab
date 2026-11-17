@@ -21,7 +21,7 @@ import sys
 import time
 
 from .backups import as_table, list_backups
-from .config import ENGINES
+from .config import ENGINES, backup_root
 from .health import collect
 from .model import Status, worst
 from .render import as_json, as_text
@@ -76,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "backups":
-        print(as_table(list_backups()))
+        print(as_table(list_backups(backup_root())))
         return 0
     if args.command == "slow":
         if args.reset:

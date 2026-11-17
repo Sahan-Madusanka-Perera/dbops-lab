@@ -1,0 +1,133 @@
+cd ansible && ANSIBLE_CONFIG=ansible.cfg ../.venv/bin/ansible-playbook playbooks/site.yml
+[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.
+[DEPRECATION WARNING]: DEFAULT_MANAGED_STR option. Reason: The `ansible_managed` variable can be set just like any other variable, or a different variable can be used.
+Alternatives: Set the `ansible_managed` variable, or use any custom variable in templates. This feature will be removed from ansible-core version 2.23.
+
+
+PLAY [Build the dbops wheel to install on the servers] *************************
+
+TASK [Build the wheel for this version of dbops] *******************************
+ok: [localhost]
+
+PLAY [Database servers] ********************************************************
+
+TASK [Gathering Facts] *********************************************************
+ok: [db-vm1]
+
+TASK [common : Install base packages] ******************************************
+changed: [db-vm1]
+
+TASK [common : Harden sshd - keys only, no root, listed users only] ************
+ok: [db-vm1]
+
+TASK [common : Create the journald drop-in directory] **************************
+ok: [db-vm1]
+
+TASK [common : Keep the journal across reboots, capped in size] ****************
+ok: [db-vm1]
+
+TASK [common : Create the dbops service user (runs the health job, cannot log in)] ***
+ok: [db-vm1]
+
+TASK [mariadb : Add the official MariaDB repository for 11.4] ******************
+[WARNING]: Module remote_tmp /root/.ansible/tmp did not exist and was created with a mode of 0700, this may cause issues when running as another user. To avoid this, create the remote_tmp dir with the correct permissions manually
+changed: [db-vm1]
+
+TASK [mariadb : Install MariaDB server, client and mariadb-backup] *************
+changed: [db-vm1]
+
+TASK [mariadb : Configure MariaDB] *********************************************
+changed: [db-vm1]
+
+TASK [mariadb : Create the drop-in directory for the mariadb unit] *************
+ok: [db-vm1]
+
+TASK [mariadb : Raise the open files limit for mariadbd] ***********************
+changed: [db-vm1]
+
+TASK [mariadb : Start MariaDB now and at boot] *********************************
+changed: [db-vm1]
+
+TASK [mariadb : Apply pending restarts] ****************************************
+
+RUNNING HANDLER [mariadb : Restart mariadb] ************************************
+changed: [db-vm1]
+
+TASK [mariadb : Remove anonymous accounts] *************************************
+[WARNING]: Option column_case_sensitive is not provided. The default is now false, so the column's name will be uppercased. The default will be changed to true in community.mysql 4.0.0.
+[DEPRECATION WARNING]: The `ansible.module_utils.six` module is deprecated. This feature will be removed from ansible-core version 2.24. Use the Python standard library equivalent instead.
+[DEPRECATION WARNING]: Importing 'to_native' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.
+ok: [db-vm1]
+
+TASK [mariadb : Remove the test database] **************************************
+ok: [db-vm1]
+
+TASK [mariadb : Create the shop database] **************************************
+changed: [db-vm1]
+
+TASK [mariadb : Count the tables in shop] **************************************
+ok: [db-vm1]
+
+TASK [mariadb : Copy the schema file] ******************************************
+changed: [db-vm1]
+
+TASK [mariadb : Import it] *****************************************************
+changed: [db-vm1]
+
+TASK [mariadb : Monitoring account, read-only, from this host] *****************
+changed: [db-vm1] => (item=(censored due to no_log))
+changed: [db-vm1] => (item=(censored due to no_log))
+
+TASK [mariadb : Application account, data only] ********************************
+changed: [db-vm1]
+
+TASK [dbops_jobs : Create the dbops directories] *******************************
+changed: [db-vm1] => (item={'path': '/opt/dbops', 'owner': 'root', 'group': 'root', 'mode': '0755'})
+changed: [db-vm1] => (item={'path': '/opt/dbops/wheels', 'owner': 'root', 'group': 'root', 'mode': '0755'})
+changed: [db-vm1] => (item={'path': '/etc/dbops', 'owner': 'root', 'group': 'dbops', 'mode': '0750'})
+changed: [db-vm1] => (item={'path': '/var/backups/dbops', 'owner': 'root', 'group': 'dbops', 'mode': '0750'})
+changed: [db-vm1] => (item={'path': '/var/backups/dbops/mariadb', 'owner': 'mysql', 'group': 'dbops', 'mode': '2750'})
+
+TASK [dbops_jobs : Copy the dbops wheel] ***************************************
+changed: [db-vm1]
+
+TASK [dbops_jobs : Install dbops in its own virtualenv, version 0.3.0] *********
+changed: [db-vm1]
+
+TASK [dbops_jobs : Write the targets file] *************************************
+changed: [db-vm1]
+
+TASK [dbops_jobs : Write the environment file (the monitoring password)] *******
+[DEPRECATION WARNING]: DEFAULT_MANAGED_STR option. Reason: The `ansible_managed` variable can be set just like any other variable, or a different variable can be used.
+Alternatives: Set the `ansible_managed` variable, or use any custom variable in templates. This feature will be removed from lookup plugin 'env' in ansible-core version 2.23.
+
+changed: [db-vm1]
+
+TASK [dbops_jobs : Install the dbops command, the backup job and the alert hook] ***
+[DEPRECATION WARNING]: DEFAULT_MANAGED_STR option. Reason: The `ansible_managed` variable can be set just like any other variable, or a different variable can be used.
+Alternatives: Set the `ansible_managed` variable, or use any custom variable in templates. This feature will be removed from connection plugin 'ssh' in ansible-core version 2.23.
+
+changed: [db-vm1] => (item={'src': 'dbops.sh.j2', 'dest': '/usr/local/bin/dbops'})
+changed: [db-vm1] => (item={'src': 'dbops-mariadb-backup.sh.j2', 'dest': '/usr/local/sbin/dbops-mariadb-backup'})
+changed: [db-vm1] => (item={'src': 'dbops-alert.sh.j2', 'dest': '/usr/local/sbin/dbops-alert'})
+
+TASK [dbops_jobs : Install the systemd units] **********************************
+changed: [db-vm1] => (item=dbops-health.service)
+changed: [db-vm1] => (item=dbops-health.timer)
+changed: [db-vm1] => (item=dbops-mariadb-backup.service)
+changed: [db-vm1] => (item=dbops-mariadb-backup.timer)
+changed: [db-vm1] => (item=dbops-alert@.service)
+
+TASK [dbops_jobs : Apply pending systemd reloads] ******************************
+
+RUNNING HANDLER [dbops_jobs : Reload systemd] **********************************
+ok: [db-vm1]
+
+TASK [dbops_jobs : Enable and start the timers] ********************************
+changed: [db-vm1] => (item=dbops-health.timer)
+changed: [db-vm1] => (item=dbops-mariadb-backup.timer)
+
+PLAY RECAP *********************************************************************
+db-vm1                     : ok=30   changed=20   unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+localhost                  : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+
