@@ -1,0 +1,78 @@
+# dbops health on a healthy lab (exit code 0)
+
+DBOps health  2026-11-17 19:20:35
+
+oracle
+  OK      reachable                                 Oracle 23.26.3.0.0, FREEPDB1
+  OK      cpu                        0.2%
+  OK      memory                     31.9%          2.44GiB / 7.654GiB
+  OK      storage                    4.0%           /opt/oracle/oradata: 14.7 GB of 452.1 GB
+  OK      sessions                   25.5%          82 of 322
+  OK      tablespace APP_DATA        54.1%          11 MB of 20 MB
+  OK      tablespace SYSAUX          0.1%           345 MB of 424713 MB
+  OK      tablespace SYSTEM          0.1%           288 MB of 424635 MB
+  OK      tablespace USERS           0%             0 MB of 32768 MB
+  OK      tablespace UNDOTBS1        0%             11 MB of 33554432 MB
+  OK      tablespace TEMP            0%             0 MB of 32768 MB
+  OK      long-running (>60s)        0
+  OK      blocked sessions           0
+
+mariadb-primary
+  OK      reachable                                 MariaDB 11.4.13-MariaDB-ubu2404-log, primary
+  OK      cpu                        0.0%
+  OK      memory                     1.8%           138.7MiB / 7.654GiB
+  OK      storage                    4.0%           /var/lib/mysql: 14.7 GB of 452.1 GB
+  OK      connections                1.3%           2 of 151
+  OK      long-running (>60s)        0
+  OK      replicas connected         1
+
+mariadb-replica
+  OK      reachable                                 MariaDB 11.4.13-MariaDB-ubu2404-log, replica
+  OK      cpu                        0.0%
+  OK      memory                     2.0%           158.2MiB / 7.654GiB
+  OK      storage                    4.0%           /var/lib/mysql: 14.7 GB of 452.1 GB
+  OK      connections                0.7%           1 of 151
+  OK      long-running (>60s)        0
+  OK      replication                IO=Yes SQL=Yes GTID 0-1-20
+  OK      replication lag            0s
+  OK      read_only                  ON
+
+mongo1
+  OK      reachable                                 MongoDB 8.0.38, primary
+  OK      cpu                        0.7%
+  OK      memory                     3.1%           246.7MiB / 7.654GiB
+  OK      storage                    4.0%           /data/db: 14.7 GB of 452.1 GB
+  OK      connections                0.02%          17 of 100313
+  OK      long-running (>60s)        0
+
+mongo2
+  OK      reachable                                 MongoDB 8.0.38, secondary
+  OK      cpu                        0.7%
+  OK      memory                     4.1%           318.7MiB / 7.654GiB
+  OK      storage                    4.0%           /data/db: 14.7 GB of 452.1 GB
+  OK      connections                0.01%          9 of 100313
+  OK      long-running (>60s)        0
+
+mongo3
+  OK      reachable                                 MongoDB 8.0.38, secondary
+  OK      cpu                        0.1%
+  OK      memory                     1.9%           152.2MiB / 7.654GiB
+  OK      storage                    4.0%           /data/db: 14.7 GB of 452.1 GB
+  OK      connections                0.01%          9 of 100313
+  OK      long-running (>60s)        0
+
+postgres
+  OK      reachable                                 PostgreSQL 17.12 (Debian 17.12-1.pgdg13+1), shop
+  OK      cpu                        0.3%
+  OK      memory                     0.5%           40.4MiB / 7.654GiB
+  OK      storage                    4.0%           /var/lib/postgresql/data: 14.7 GB of 452.1 GB
+  OK      connections                1.0%           1 of 100
+  OK      long-running (>60s)        0
+  OK      blocked sessions           0
+
+rs0
+  OK      primary                    mongo1:27017
+  OK      lag mongo2:27017           0s
+  OK      lag mongo3:27017           0s
+
+OK      57 OK, 0 WARN, 0 CRIT, 0 UNKNOWN

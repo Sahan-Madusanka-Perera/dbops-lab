@@ -62,7 +62,29 @@ MongoDB:
 rs.status().members.map(m => `${m.name} ${m.stateStr} ${m.optimeDate}`)
 ```
 
-### 2.5 Start again from empty
+### 2.5 Health checks
+
+```bash
+make install     # once
+make health      # or: .venv/bin/dbops health --watch 30
+```
+
+`dbops health` connects as `dbops_monitor`, which `make up` creates (or
+`make monitor-users` after a password change). What to do when a check fails:
+
+| Check | Status | First move |
+|---|---|---|
+| `reachable` | CRIT | `make ps`, then `make logs s=<service>` |
+| `container` | CRIT | The container stopped: `docker start dbops-<name>`, then find out why in its logs |
+| `replication` (MariaDB) | CRIT | Read the error in the detail column. A stopped thread with no error: `START REPLICA;` on the replica. Data drift (duplicate key, missing row): rebuild with `make replication` |
+| `replication lag` | WARN/CRIT | Long transaction on the primary, or a slow statement on the replica: check `long-running` on both |
+| `read_only` | CRIT | `SET GLOBAL read_only = ON;` on the replica, then look for writes that landed there |
+| `primary` / `member` (rs0) | CRIT | `make mongo`, `rs.status()`. A stopped member rejoins on its own once started |
+| `tablespace` | WARN/CRIT | Add a datafile or resize: `ALTER TABLESPACE app_data ADD DATAFILE ... SIZE 50M;` |
+| `blocked sessions` | WARN/CRIT | The detail names the blocker. Ask its owner, or end it: Oracle `ALTER SYSTEM KILL SESSION 'sid,serial#'`, Postgres `SELECT pg_terminate_backend(pid)` |
+| `long-running` | WARN/CRIT | Find out what the statement is before killing it; M4 covers why it is slow |
+
+### 2.6 Start again from empty
 
 ```bash
 make reset    # deletes every volume; asks first

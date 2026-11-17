@@ -16,8 +16,38 @@ Needs Docker Desktop with at least 6 GB of memory.
 cp .env.example .env    # change the passwords
 make up                 # Oracle, MariaDB x2, MongoDB x3, PostgreSQL
 make replication        # seed the MariaDB replica, start GTID replication
+make install            # the dbops CLI, in .venv
+make health             # one verdict for all seven instances
 make                    # list every command
 ```
+
+## dbops health (M2)
+
+Connects to every instance as a read-only `dbops_monitor` account and checks:
+
+| | Oracle | MariaDB | MongoDB | PostgreSQL |
+|---|---|---|---|---|
+| CPU, memory, storage of the data directory | ✓ | ✓ | ✓ | ✓ |
+| Connections against the limit | sessions | ✓ | ✓ | ✓ |
+| Statements running over 60 s | ✓ | ✓ | ✓ | ✓ |
+| Blocked sessions | ✓ | | | ✓ |
+| Tablespace usage | ✓ | | | |
+| Replication | | threads, lag, `read_only`, replica connected | primary, member state, lag | |
+
+```bash
+dbops health                     # text, grouped by instance
+dbops health --engine oracle     # one engine; repeat the flag for more
+dbops health --json              # for a monitoring system
+dbops health --watch 30          # refresh every 30 s
+```
+
+Exit codes follow the Nagios plugin convention (0 OK, 1 WARN, 2 CRIT, 3 UNKNOWN),
+so it drops straight into cron, a systemd timer or any Nagios-compatible monitor.
+Thresholds are all in [dbops/thresholds.py](dbops/thresholds.py).
+
+Measured output is in [results/](results/): a healthy run, and a run with four
+faults injected (stopped replica SQL thread, stopped Mongo member, an Oracle row
+lock, long queries), each caught with the blocker and the wait event named.
 
 Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
@@ -38,7 +68,8 @@ Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.m
 ```
 engines/     one folder per database engine: config and init scripts the containers mount
 scripts/     shell scripts for operations (replication setup, backups), grouped by engine
-dbops/       the Python CLI: health, backup verification, slow queries, access review (M2+)
+dbops/       the Python CLI: health (M2); backup verification, slow queries, access review to come
+tests/       unit tests (no databases needed) and live tests against the lab
 drills/      scripts that cause an incident on purpose (M7)
 ansible/     inventory, playbooks and roles for a Linux VM (M6)
 docs/        RUNBOOK.md, plus incidents/ for postmortems

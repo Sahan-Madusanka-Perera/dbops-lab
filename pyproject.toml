@@ -1,0 +1,29 @@
+[project]
+name = "dbops"
+version = "0.2.0"
+description = "Operations toolkit for the DBOps Lab: health checks across Oracle, MariaDB, MongoDB and PostgreSQL"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "oracledb>=2.4",       # thin mode: no Oracle client install needed
+  "PyMySQL>=1.1",
+  "pymongo>=4.8",
+  "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+dbops = "dbops.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dbops*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: needs the lab running (make up); run with DBOPS_LIVE=1"]
