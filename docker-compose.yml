@@ -1,0 +1,161 @@
+# DBOps Lab: four database engines on one Docker network.
+#
+#   oracle            Oracle Database 23ai Free, app schema SHOP in FREEPDB1
+#   mariadb-primary   MariaDB 11.4 LTS, binlog + GTID, slow query log on
+#   mariadb-replica   read-only replica; wired up by scripts/mariadb/setup-replication.sh
+#   mongo1..3         replica set rs0; mongo-init initiates it and seeds shop.orders
+#   postgres          PostgreSQL 17 with pg_stat_statements
+#
+# Every engine seeds the same small "shop" schema (customers, orders), so the
+# same question can be asked of all four in later milestones.
+
+name: dbops-lab
+
+x-mongo-node: &mongo-node
+  image: mongo:8.0
+  command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+    interval: 5s
+    timeout: 5s
+    retries: 20
+  restart: unless-stopped
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:23
+    container_name: dbops-oracle
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?set it in .env}
+      APP_USER: shop
+      APP_USER_PASSWORD: ${ORACLE_APP_PASSWORD:?set it in .env}
+    ports:
+      - "${ORACLE_PORT:-1521}:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./engines/oracle/init:/container-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  mariadb-primary:
+    image: mariadb:11.4
+    container_name: dbops-mariadb-primary
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set it in .env}
+      MARIADB_DATABASE: shop
+      MARIADB_USER: shop
+      MARIADB_PASSWORD: ${MARIADB_APP_PASSWORD:?set it in .env}
+    ports:
+      - "${MARIADB_PRIMARY_PORT:-3306}:3306"
+    volumes:
+      - mariadb-primary-data:/var/lib/mysql
+      - ./engines/mariadb/primary/conf.d:/etc/mysql/conf.d:ro
+      - ./engines/mariadb/primary/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mariadb-replica:
+    image: mariadb:11.4
+    container_name: dbops-mariadb-replica
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set it in .env}
+    ports:
+      - "${MARIADB_REPLICA_PORT:-3307}:3306"
+    volumes:
+      - mariadb-replica-data:/var/lib/mysql
+      - ./engines/mariadb/replica/conf.d:/etc/mysql/conf.d:ro
+    depends_on:
+      mariadb-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mongo1:
+    <<: *mongo-node
+    container_name: dbops-mongo1
+    hostname: mongo1
+    ports:
+      - "${MONGO1_PORT:-27017}:27017"
+    volumes:
+      - mongo1-data:/data/db
+
+  mongo2:
+    <<: *mongo-node
+    container_name: dbops-mongo2
+    hostname: mongo2
+    ports:
+      - "${MONGO2_PORT:-27018}:27017"
+    volumes:
+      - mongo2-data:/data/db
+
+  mongo3:
+    <<: *mongo-node
+    container_name: dbops-mongo3
+    hostname: mongo3
+    ports:
+      - "${MONGO3_PORT:-27019}:27017"
+    volumes:
+      - mongo3-data:/data/db
+
+  # One-shot, run by `make up` after the nodes are healthy: initiates rs0 on the
+  # first run and reports its members on every run after. The profile keeps it
+  # out of a plain `docker compose up`, whose --wait would treat its exit as a failure.
+  mongo-init:
+    image: mongo:8.0
+    profiles: ["init"]
+    command: ["mongosh", "--host", "mongo1:27017", "--quiet", "/scripts/init-replica-set.js"]
+    volumes:
+      - ./engines/mongo:/scripts:ro
+    depends_on:
+      mongo1: { condition: service_healthy }
+      mongo2: { condition: service_healthy }
+      mongo3: { condition: service_healthy }
+    restart: "no"
+
+  postgres:
+    image: postgres:17
+    container_name: dbops-postgres
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - log_min_duration_statement=500
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./engines/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  oracle-data:
+  mariadb-primary-data:
+  mariadb-replica-data:
+  mongo1-data:
+  mongo2-data:
+  mongo3-data:
+  postgres-data:
