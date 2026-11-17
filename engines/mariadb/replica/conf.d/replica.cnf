@@ -10,6 +10,11 @@ log_slave_updates      = ON
 relay_log              = relay-bin
 binlog_expire_logs_seconds = 259200   # 3 days
 
-slow_query_log         = ON
-slow_query_log_file    = /var/lib/mysql/slow.log
-long_query_time        = 0.5
+slow_query_log                  = ON
+slow_query_log_file             = /var/lib/mysql/slow.log
+log_slow_query_time             = 0.5
+# Also log any statement that reads 1,000+ rows without an index: on a small
+# table that is fast today and slow once the table grows.
+log_queries_not_using_indexes   = ON
+log_slow_min_examined_row_limit = 1000
+log_slow_verbosity              = query_plan

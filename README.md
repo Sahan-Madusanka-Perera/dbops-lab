@@ -74,6 +74,47 @@ Measured: Oracle backs up in about 45 s (465 MB) and restores in about 2.5 min;
 the others take seconds. A backup piece with 4 KB overwritten is caught by
 `RESTORE VALIDATE` ([results/m3-oracle-corrupt-piece.txt](results/m3-oracle-corrupt-piece.txt)).
 
+## Slow queries (M4)
+
+`dbops slow` ranks each engine's statements by total time, reads the plan each
+one used, and says why it is slow and what would fix it. `dbops workload` runs a
+fixed application query mix against all four engines so there is something to find.
+
+| Engine | Where the statements come from | Plan |
+|---|---|---|
+| Oracle | `V$SQL` for the SHOP schema | `V$SQL_PLAN`: the plan the cursor actually ran; optimizer statistics from `DBA_TAB_STATISTICS` |
+| MariaDB | the slow query log on the primary (over 0.5 s, or a full scan of 1,000+ rows), grouped with literals replaced | `EXPLAIN FORMAT=JSON` of the slowest instance; estimated rows vs rows read flags stale statistics |
+| MongoDB | the profiler (`system.profile`) on all three members (over 500 ms, or 1,000+ documents read), grouped by query shape | the profile entry's own plan summary (`COLLSCAN`, in-memory sort) |
+| PostgreSQL | `pg_stat_statements` | `EXPLAIN (GENERIC_PLAN)`: the stored text is explained without running it or filling in values |
+
+Index suggestions follow ESR: **E**quality columns, then **S**ort, then **R**ange,
+so one index serves the filter, returns rows already in order and narrows the range.
+Tables under 1,000 rows get no suggestion. Suggestions are for review: nothing is applied.
+
+```bash
+make slow a=--reset      # clear each engine's statistics, to measure from now
+make workload            # 30 s of the application mix, latency per query
+make slow                # top 3 per engine: plan, why, fix
+make slow a=--ddl        # just the fixes, as a script to review
+```
+
+Measured on this lab ([results/m4-before-after.txt](results/m4-before-after.txt)), applying the
+suggested fixes ([results/m4-fixes.sql](results/m4-fixes.sql)):
+
+| p50 latency, ms | Oracle | MariaDB | MongoDB | PostgreSQL |
+|---|---|---|---|---|
+| orders for a customer, newest first | 1.14 → 0.70 | 0.51 → 0.46 | 13.76 → 0.33 | 1.50 → 0.36 |
+| orders in the last day | 5.69 → 0.75 | 3.71 → 0.53 | 14.47 → 0.41 | 4.22 → 0.37 |
+| queries per second, whole mix | 1.6× | 1.4× | 16× | 2.6× |
+
+The first "after" run made MariaDB **slower**: `pending_totals` went from 6.9 ms to
+24 ms. With the new `status` index the optimizer drove the join from `customers`,
+whose statistics said 77 rows (it has 5,000), and probed `orders` 5,000 times.
+`dbops slow` reported the stale statistics; `ANALYZE TABLE customers` brought it to
+5.2 ms. An index can make a plan worse: measure after every change.
+
+The indexes live only in the running lab. `make reset` starts again without them.
+
 Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## Milestones

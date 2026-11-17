@@ -107,7 +107,36 @@ backed up and older than a day are deleted from the recovery area.
 Oracle needs ARCHIVELOG mode for online backups. `make up` turns it on;
 `make archivelog` does it on its own (one 30-second restart the first time).
 
-### 2.7 Start again from empty
+### 2.7 Find and fix slow queries
+
+```bash
+make slow a=--reset      # measure from now
+make workload            # or wait for real traffic
+make slow                # top 3 per engine; make slow a="--top 10" for more
+make slow a=--ddl        # the suggested fixes as one script
+```
+
+1. Read each finding's `why`. A full scan of a small table, or a query that has
+   to read a large result (an aggregate over 5,000 rows), needs no index.
+2. A `statistics are stale` / `no optimizer statistics` note comes first: fix the
+   statistics (`ANALYZE TABLE`, `DBMS_STATS.GATHER_TABLE_STATS`) and measure again
+   before adding an index. The plan may already change.
+3. Create the index in the engine's own client (`make oracle`, `make mariadb`,
+   `make mongo`, `make psql`). MariaDB: on the primary only; it replicates.
+   MongoDB: connect to the primary.
+4. `make slow a=--reset`, run the workload again and compare latency per query,
+   **all** queries, not just the one you fixed. A new index changes other plans.
+
+Where the data comes from, and how to clear it, per engine:
+
+| Engine | Source | `--reset` does |
+|---|---|---|
+| Oracle | `V$SQL`, `V$SQL_PLAN` | `ALTER SYSTEM FLUSH SHARED_POOL` in FREEPDB1 (every cursor is hard-parsed again: not on a busy production system) |
+| MariaDB | `/var/lib/mysql/slow.log` on the primary | truncates the file |
+| MongoDB | `system.profile` in `shop`, each member | records the time in `.dbops/mongo-profile-since`; older entries are ignored (a secondary cannot drop the collection) |
+| PostgreSQL | `pg_stat_statements` | `pg_stat_statements_reset()` |
+
+### 2.8 Start again from empty
 
 ```bash
 make reset    # deletes every volume; asks first
@@ -115,6 +144,21 @@ make up && make replication
 ```
 
 ## 3. Troubleshooting
+
+### A new index made a query slower
+
+Seen in M4 on MariaDB: after `ix_orders_status`, the `pending_totals` join went
+from 6.9 ms to 24 ms. `make slow` showed `optimizer estimates 77 rows in customers`;
+the table has 5,000. InnoDB's persistent statistics were taken while the seed was
+still loading. Fix: `ANALYZE TABLE customers;` (5.2 ms afterwards). Check
+`information_schema.tables.table_rows` against `COUNT(*)` when a plan looks wrong.
+
+### `dbops slow` shows `could not EXPLAIN`
+
+PostgreSQL: the stored statement has a placeholder where SQL does not allow one.
+`interval $1` is rewritten to `$1::interval` already; anything else, explain it by
+hand in `make psql` with real values. MariaDB: the slow log holds a statement that
+cannot be explained (a `CALL`, or a schema that no longer exists).
 
 ### Oracle stays `(health: starting)` for minutes on the first run
 
