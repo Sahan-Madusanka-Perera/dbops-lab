@@ -4,6 +4,7 @@
     dbops health --engine oracle       one engine (repeatable)
     dbops health --json                one JSON document, for monitoring
     dbops health --watch 30            re-run every 30 seconds
+    dbops backups                      every backup on disk and its restore test result
 
 Exit codes follow the Nagios plugin convention:
     0 OK   1 WARN   2 CRIT   3 UNKNOWN (including a usage error)
@@ -15,6 +16,7 @@ import argparse
 import sys
 import time
 
+from .backups import as_table, list_backups
 from .config import ENGINES
 from .health import collect
 from .model import Status, worst
@@ -40,11 +42,16 @@ def _parser() -> argparse.ArgumentParser:
     output.add_argument("--json", action="store_true", help="print one JSON document")
     output.add_argument("--watch", type=int, metavar="SECONDS", help="re-run every SECONDS until Ctrl-C")
     health.add_argument("--no-colour", action="store_true", help="plain text even on a terminal")
+
+    sub.add_parser("backups", help="list backups and their restore test results (make backup takes them)")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "backups":
+        print(as_table(list_backups()))
+        return 0
     if args.watch is not None and args.watch < 1:
         _parser().error("--watch needs at least 1 second")
 

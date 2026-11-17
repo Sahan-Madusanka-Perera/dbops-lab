@@ -12,5 +12,8 @@ REPLICATION_LAG_S = (30, 300)
 LONG_RUNNING_S = 60               # a statement active this long counts as long-running
 LONG_RUNNING_COUNT = (1, 5)       # how many long-running statements before WARN / CRIT
 
+# Hours since the newest backup that passed its restore test (a daily job, with slack)
+BACKUP_AGE_H = (26, 50)
+
 # Count
 BLOCKED_SESSIONS = (1, 5)

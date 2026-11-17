@@ -6,6 +6,10 @@
 #   mongo1..3         replica set rs0; mongo-init initiates it and seeds shop.orders
 #   postgres          PostgreSQL 17 with pg_stat_statements
 #
+# ./backups/<engine> is mounted at /backups where that engine's backup runs (M3):
+# Oracle itself, the MariaDB replica and mongo2 (backups come off a replica, not
+# the primary), and PostgreSQL.
+#
 # Every engine seeds the same small "shop" schema (customers, orders), so the
 # same question can be asked of all four in later milestones.
 
@@ -34,6 +38,7 @@ services:
     volumes:
       - oracle-data:/opt/oracle/oradata
       - ./engines/oracle/init:/container-entrypoint-initdb.d:ro
+      - ./backups/oracle:/backups
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 10s
@@ -73,6 +78,7 @@ services:
     volumes:
       - mariadb-replica-data:/var/lib/mysql
       - ./engines/mariadb/replica/conf.d:/etc/mysql/conf.d:ro
+      - ./backups/mariadb:/backups
     depends_on:
       mariadb-primary:
         condition: service_healthy
@@ -100,6 +106,7 @@ services:
       - "${MONGO2_PORT:-27018}:27017"
     volumes:
       - mongo2-data:/data/db
+      - ./backups/mongo:/backups
 
   mongo3:
     <<: *mongo-node
@@ -144,6 +151,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./engines/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./backups/postgres:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
       interval: 5s

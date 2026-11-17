@@ -6,15 +6,17 @@ export
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs replication monitor-users install health test test-live oracle mariadb mariadb-replica mongo psql reset
+.PHONY: help up down ps logs replication monitor-users archivelog backup backups install health test test-live oracle mariadb mariadb-replica mongo psql reset
 
 help: ## List the commands
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
 
 up: .env ## Start every engine, wait until each is healthy, initiate the Mongo replica set
+	mkdir -p backups/oracle backups/mariadb backups/mongo backups/postgres
 	$(COMPOSE) up -d --wait --wait-timeout 600
 	$(COMPOSE) run --rm mongo-init
 	scripts/create-monitor-users.sh
+	scripts/oracle/enable-archivelog.sh > /dev/null
 
 down: ## Stop the lab, keep the data
 	$(COMPOSE) down
@@ -30,6 +32,19 @@ replication: ## Seed the MariaDB replica from the primary and start GTID replica
 
 monitor-users: ## Create or update the read-only dbops_monitor account in each engine
 	scripts/create-monitor-users.sh
+
+archivelog: ## Put Oracle in ARCHIVELOG mode and set RMAN defaults (make up does this)
+	scripts/oracle/enable-archivelog.sh
+
+ENGINES_TO_BACK_UP := $(or $(e),postgres mariadb mongo oracle)
+backup: ## Back up and restore-test every engine; one engine: make backup e=oracle
+	@failed=""; for engine in $(ENGINES_TO_BACK_UP); do \
+	  echo "=== $$engine"; scripts/backup/$$engine.sh || failed="$$failed $$engine"; echo; \
+	done; \
+	if [[ -n "$$failed" ]]; then echo "FAILED:$$failed"; exit 1; else echo "all backups verified"; fi
+
+backups: ## List backups and their restore test results
+	.venv/bin/dbops backups
 
 install: ## Create .venv and install the dbops CLI with its test tools
 	python3 -m venv .venv

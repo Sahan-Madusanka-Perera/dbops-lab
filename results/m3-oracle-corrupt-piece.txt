@@ -1,0 +1,35 @@
+# RESTORE DATABASE ... VALIDATE against a backup piece with 4.4 KB overwritten in the middle
+# (backups/oracle/20261117T151252Z/db_0knnrsnn_20_1_1, 272 MB). RMAN exit code 1.
+# The original piece was put back afterwards and validated cleanly.
+
+Version 23.26.3.0.0
+RMAN> RESTORE DATABASE FROM TAG 'DBOPS_20261117T151252Z' VALIDATE;
+Starting restore at 17-NOV-26
+using target database control file instead of recovery catalog
+allocated channel: ORA_DISK_1
+channel ORA_DISK_1: SID=64 device type=DISK
+channel ORA_DISK_1: starting validation of datafile backup set
+channel ORA_DISK_1: reading from backup piece /backups/20261117T151252Z/db_0knnrsnn_20_1_1
+channel ORA_DISK_1: ORA-19870: error while restoring backup piece /backups/20261117T151252Z/db_0knnrsnn_20_1_1
+ORA-19599: Block number 16684 is corrupt in backup piece /backups/20261117T151252Z/db_0knnrsnn_20_1_1.
+channel ORA_DISK_1: starting validation of datafile backup set
+channel ORA_DISK_1: reading from backup piece /backups/20261117T151252Z/db_0lgorsog_21_1_1
+channel ORA_DISK_1: piece handle=/backups/20261117T151252Z/db_0lgorsog_21_1_1 tag=DBOPS_20261117T151252Z
+channel ORA_DISK_1: restored backup piece 1
+channel ORA_DISK_1: validation complete, elapsed time: 00:00:15
+channel ORA_DISK_1: starting validation of datafile backup set
+channel ORA_DISK_1: reading from backup piece /backups/20261117T151252Z/db_0mnorson_22_1_1
+channel ORA_DISK_1: piece handle=/backups/20261117T151252Z/db_0mnorson_22_1_1 tag=DBOPS_20261117T151252Z
+channel ORA_DISK_1: restored backup piece 1
+channel ORA_DISK_1: validation complete, elapsed time: 00:00:15
+failover to previous backup
+RMAN-00571: ===========================================================
+RMAN-00569: =============== ERROR MESSAGE STACK FOLLOWS ===============
+RMAN-00571: ===========================================================
+RMAN-03002: failure of restore command at 11/17/2026 15:17:12
+RMAN-06026: some targets not found - aborting restore
+RMAN-06023: no backup or copy of datafile 18 found to restore
+RMAN-06023: no backup or copy of datafile 7 found to restore
+RMAN-06023: no backup or copy of datafile 3 found to restore
+RMAN-06023: no backup or copy of datafile 1 found to restore
+RMAN Client Diagnostic Trace file : /opt/oracle/diag/clients/user_oracle/RMAN_1309145632_116/trace/ora_rman_1179_0.trc

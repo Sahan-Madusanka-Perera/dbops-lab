@@ -84,7 +84,30 @@ make health      # or: .venv/bin/dbops health --watch 30
 | `blocked sessions` | WARN/CRIT | The detail names the blocker. Ask its owner, or end it: Oracle `ALTER SYSTEM KILL SESSION 'sid,serial#'`, Postgres `SELECT pg_terminate_backend(pid)` |
 | `long-running` | WARN/CRIT | Find out what the statement is before killing it; M4 covers why it is slow |
 
-### 2.6 Start again from empty
+### 2.6 Backups and restore tests
+
+```bash
+make backup              # all four engines; make backup e=oracle for one
+make backups             # what is on disk, and whether each passed its restore test
+```
+
+Every run takes a backup, restores it into a throwaway `dbops-verify-<engine>`
+container, compares the data with the source and removes the container. A
+script exits 1 when the restore test fails, so cron or CI sees it.
+
+Before it writes anything, each script checks free space on the host disk:
+2-3 GB for MariaDB, MongoDB and PostgreSQL, 8 GB for Oracle (the full restore
+writes about 3 GB of datafiles). `scripts/backup/oracle.sh --validate-only`
+skips the full restore and needs 3 GB.
+
+Retention: the newest 3 backups per engine (`BACKUP_KEEP` to change it). Oracle
+uses RMAN's own: `REDUNDANCY 2`, `DELETE OBSOLETE`, and archived logs already
+backed up and older than a day are deleted from the recovery area.
+
+Oracle needs ARCHIVELOG mode for online backups. `make up` turns it on;
+`make archivelog` does it on its own (one 30-second restart the first time).
+
+### 2.7 Start again from empty
 
 ```bash
 make reset    # deletes every volume; asks first
@@ -121,3 +144,22 @@ Change the port in `.env` and `make up` again.
 
 They only run when a volume is empty. Changing a file in `engines/*/init` does
 nothing to an existing database; `make reset` to start again.
+
+### A backup script stops with `needs at least N GB`
+
+Working as intended: there is not enough free space on the Mac for the backup
+and its restore test, and nothing was written. Free space and run it again.
+See [INC-001](incidents/INC-001-docker-disk-full.md) for what happens without this check.
+
+### Docker reports `input/output error`, or containers exit with code 128
+
+The Mac's disk filled up under Docker's VM. Free space first, then
+`docker desktop restart`. Containers that then fail with `failed to start shim
+... file exists` need recreating (their volumes keep the data):
+`docker compose up -d --force-recreate <service>`.
+
+### `RESTORE ... VALIDATE` fails with `ORA-19599 ... is corrupt in backup piece`
+
+That backup piece is damaged. RMAN tries an older backup automatically
+("failover to previous backup"). Take a new backup straight away and check the
+disk the backups are on.
