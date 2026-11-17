@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+# What dbops health checks on this server (see dbops/config.py).
+backup_dir = "{{ dbops_jobs_backup_dir }}"
+{% for t in dbops_jobs_targets %}
+
+[[target]]
+name = "{{ t.name }}"
+engine = "{{ t.engine }}"
+host = "{{ t.host }}"
+port = {{ t.port }}
+data_dir = "{{ t.data_dir }}"
+backups = {{ t.backups | default(false) | lower }}
+{% endfor %}

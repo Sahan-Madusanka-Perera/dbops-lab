@@ -10,9 +10,15 @@ __pycache__/
 # Backups are produced by the lab, never committed (M3)
 backups/
 
-# Ansible
+# Ansible: collections from requirements.yml, the dbops wheel built for the hosts (M6)
 ansible/*.retry
-ansible/inventory.ini
+ansible/collections/
+build/
+
+# Terraform: providers and state (the state lists every resource; never commit it)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
 
 .DS_Store
 *.egg-info/
@@ -20,5 +26,5 @@ ansible/inventory.ini
 # dbops local state (slow --reset markers)
 .dbops/
 
-# Generated secrets (make secrets): the MongoDB replica set keyfile
+# Generated secrets: MongoDB keyfile (M5), the Ansible SSH key and known_hosts (M6)
 secrets/

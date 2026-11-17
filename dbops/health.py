@@ -7,8 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 
 from .backups import backup_checks
-from .config import ENGINES, Target, targets as all_targets
-from .host import docker_stats, host_checks
+from .config import ENGINES, Target, backup_root, targets as all_targets
+from .host import docker_stats, host_checks, local_host_checks
 from .model import Check, Status
 
 
@@ -18,8 +18,9 @@ def collect(engines: list[str] | None = None, env: dict | None = None) -> list[C
     for tg in chosen:
         by_engine.setdefault(tg.engine, []).append(tg)
 
+    in_docker = any(tg.container for tg in chosen)
     with ThreadPoolExecutor(max_workers=len(by_engine) + 1) as pool:
-        stats_future = pool.submit(docker_stats)
+        stats_future = pool.submit(docker_stats if in_docker else dict)
         engine_futures = {e: pool.submit(import_module(f".engines.{e}", __package__).run, tgs)
                           for e, tgs in by_engine.items()}
         engine_checks = [c for e in by_engine for c in engine_futures[e].result()]
@@ -29,7 +30,8 @@ def collect(engines: list[str] | None = None, env: dict | None = None) -> list[C
             stats = None
             stats_error = str(e).strip()[:120] or "docker stats failed"
 
-    backups = {c.target: c for c in backup_checks(list(by_engine))}
+    sources = {tg.engine: tg.name for tg in chosen if tg.backups}
+    backups = {c.target: c for c in backup_checks(list(by_engine), root=backup_root(env), sources=sources)}
 
     # Per instance: reachable, then cpu / memory / storage, then the engine's own checks,
     # then its last verified backup if backups are taken from it.
@@ -37,7 +39,9 @@ def collect(engines: list[str] | None = None, env: dict | None = None) -> list[C
     for tg in chosen:
         own = [c for c in engine_checks if c.target == tg.name]
         ordered += [c for c in own if c.name == "reachable"]
-        if stats is None:
+        if not tg.container:
+            ordered += local_host_checks(tg)
+        elif stats is None:
             ordered.append(Check(tg.name, "host metrics", Status.UNKNOWN, detail=stats_error))
         else:
             ordered += host_checks(tg, stats)

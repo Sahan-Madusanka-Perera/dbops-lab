@@ -6,7 +6,7 @@ export
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs replication accounts archivelog backup backups install health workload slow access test test-live oracle mariadb mariadb-replica mongo psql reset
+.PHONY: help up down ps logs replication accounts archivelog backup backups install health workload slow access test test-live oracle mariadb mariadb-replica mongo psql reset vm-up vm-provision vm-check vm-verify vm-ssh vm-down
 
 help: ## List the commands
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -50,9 +50,9 @@ backup: ## Back up and restore-test every engine; one engine: make backup e=orac
 backups: ## List backups and their restore test results
 	.venv/bin/dbops backups
 
-install: ## Create .venv and install the dbops CLI with its test tools
+install: ## Create .venv and install the dbops CLI with its test and ops tools (pytest, Ansible)
 	python3 -m venv .venv
-	.venv/bin/pip install -q -e ".[dev]"
+	.venv/bin/pip install -q -e ".[dev,ops]"
 
 health: ## Health of every instance (exit 0 OK, 1 WARN, 2 CRIT, 3 UNKNOWN)
 	.venv/bin/dbops health
@@ -93,3 +93,36 @@ reset: ## Delete every volume and start again from empty (asks first)
 
 .env:
 	@echo "No .env yet: run  cp .env.example .env  and change the passwords" && exit 1
+
+# ---------------------------------------------------------------- M6: a Linux server built by Terraform + Ansible
+
+TF := terraform -chdir=terraform
+ANSIBLE := cd ansible && ANSIBLE_CONFIG=ansible.cfg ../.venv/bin/ansible
+PLAYBOOK := cd ansible && ANSIBLE_CONFIG=ansible.cfg ../.venv/bin/ansible-playbook
+
+secrets/vm_ed25519:
+	mkdir -p secrets
+	ssh-keygen -q -t ed25519 -N "" -C "dbops-lab ansible" -f $@
+
+ansible/collections: ansible/requirements.yml
+	cd ansible && ../.venv/bin/ansible-galaxy collection install -r requirements.yml -p collections
+	touch $@
+
+vm-up: secrets/vm_ed25519 ## Create the Linux host db-vm1 with Terraform (SSH on 2222, MariaDB on 3318)
+	$(TF) init -input=false
+	$(TF) apply -input=false -auto-approve
+
+vm-provision: ansible/collections ## Build db-vm1 with Ansible: base setup, MariaDB, dbops timers
+	$(PLAYBOOK) playbooks/site.yml
+
+vm-check: ansible/collections ## Dry run with diff: what vm-provision would change (nothing, once it has run)
+	$(PLAYBOOK) playbooks/site.yml --check --diff
+
+vm-verify: ## Run the backup job and dbops health on db-vm1 now, and show the timers
+	$(PLAYBOOK) playbooks/verify.yml
+
+vm-ssh: ## SSH into db-vm1 as ansible
+	ssh -i secrets/vm_ed25519 -p 2222 -o UserKnownHostsFile=secrets/vm_known_hosts ansible@127.0.0.1
+
+vm-down: ## Delete db-vm1 and its disks (asks first)
+	$(TF) destroy -input=false

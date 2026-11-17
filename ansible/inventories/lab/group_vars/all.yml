@@ -1,0 +1,10 @@
+---
+# The dbops version to deploy is the one in pyproject.toml: bump it to roll out a change.
+dbops_repo_root: "{{ playbook_dir }}/../.."
+dbops_version: "{{ lookup('ansible.builtin.file', dbops_repo_root ~ '/pyproject.toml')
+  | regex_search('(?m)^version = \"([^\"]+)\"', '\\1') | first }}"
+dbops_wheel: "dbops-{{ dbops_version }}-py3-none-any.whl"
+dbops_build_dir: "{{ dbops_repo_root }}/build"
+
+# The header every template writes: do not edit on the host.
+ansible_managed: Managed by Ansible (dbops-lab/ansible). Changes here are overwritten.

@@ -1,0 +1,35 @@
+# {{ ansible_managed }}
+# Loaded after the package's 50-server.cnf, so these settings win.
+[mariadb]
+server_id                  = {{ mariadb_server_id }}
+bind_address               = {{ mariadb_bind_address }}
+max_connections            = {{ mariadb_max_connections }}
+character_set_server       = utf8mb4
+collation_server           = utf8mb4_unicode_ci
+skip_name_resolve          = ON
+
+innodb_buffer_pool_size    = {{ mariadb_innodb_buffer_pool_size }}
+innodb_flush_log_at_trx_commit = 1
+
+# Binary log + GTID: point-in-time recovery, and a replica later
+log_bin                    = mariadb-bin
+binlog_format              = ROW
+gtid_strict_mode           = ON
+binlog_expire_logs_seconds = {{ mariadb_binlog_expire_seconds }}
+
+# Slow query log, as in the lab (M4)
+slow_query_log                  = ON
+slow_query_log_file             = /var/lib/mysql/slow.log
+log_slow_query_time             = 0.5
+log_queries_not_using_indexes   = ON
+log_slow_min_examined_row_limit = 1000
+log_slow_verbosity              = query_plan
+
+# Login auditing, as in the lab (M5)
+plugin_load_add               = server_audit
+server_audit                  = FORCE_PLUS_PERMANENT
+server_audit_logging          = ON
+server_audit_events           = CONNECT
+server_audit_file_path        = /var/lib/mysql/server_audit.log
+server_audit_file_rotate_size = 10485760
+server_audit_file_rotations   = 9

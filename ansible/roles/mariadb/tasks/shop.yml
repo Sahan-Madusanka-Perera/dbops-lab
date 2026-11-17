@@ -1,0 +1,53 @@
+---
+- name: Create the shop database
+  community.mysql.mysql_db:
+    name: shop
+    encoding: utf8mb4
+    state: present
+    login_unix_socket: "{{ mariadb_socket }}"
+
+- name: Count the tables in shop
+  community.mysql.mysql_query:
+    query: SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = 'shop'
+    login_unix_socket: "{{ mariadb_socket }}"
+  register: mariadb_shop_tables
+  changed_when: false
+  check_mode: false     # a read-only SELECT: run it in --check too, or the next task has nothing to test
+
+- name: Load the shop schema and seed data (first run only)
+  when: mariadb_shop_tables.query_result[0][0].n | int == 0
+  block:
+    - name: Copy the schema file
+      ansible.builtin.copy:
+        src: "{{ mariadb_shop_schema }}"
+        dest: /root/shop-schema.sql
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Import it
+      community.mysql.mysql_db:
+        name: shop
+        state: import
+        target: /root/shop-schema.sql
+        login_unix_socket: "{{ mariadb_socket }}"
+
+# The same approved accounts as the lab (policy/access-policy.toml), passwords from .env.
+- name: Monitoring account, read-only, from this host
+  community.mysql.mysql_user:
+    name: dbops_monitor
+    host: "{{ item }}"
+    password: "{{ mariadb_monitor_password }}"
+    priv: "*.*:PROCESS,SLAVE MONITOR"
+    login_unix_socket: "{{ mariadb_socket }}"
+  loop: [localhost, 127.0.0.1]
+  no_log: true
+
+- name: Application account, data only
+  community.mysql.mysql_user:
+    name: shop_app
+    host: "%"
+    password: "{{ mariadb_app_password }}"
+    priv: "shop.*:SELECT,INSERT,UPDATE,DELETE"
+    login_unix_socket: "{{ mariadb_socket }}"
+  no_log: true

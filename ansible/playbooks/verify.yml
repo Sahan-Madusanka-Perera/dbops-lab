@@ -1,0 +1,49 @@
+---
+# Smoke test for a built server: run the jobs now instead of waiting for their
+# timers, and fail if one of them did not do its job. make vm-verify runs it.
+
+- name: Verify the dbops jobs on the database servers
+  hosts: dbservers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run the backup job now (a oneshot unit, so this waits for it to finish)
+      ansible.builtin.systemd_service:
+        name: dbops-mariadb-backup.service
+        state: started
+
+    - name: Read what the backup job logged
+      ansible.builtin.command: journalctl -u dbops-mariadb-backup.service -n 6 -o cat --no-pager
+      register: verify_backup_log
+      changed_when: false
+
+    - name: Run dbops health as the timer does
+      ansible.builtin.command: /usr/local/bin/dbops health --no-colour
+      register: verify_health
+      changed_when: false
+      failed_when: verify_health.rc not in [0, 1]       # OK or WARN
+
+    - name: List the backups on the server
+      ansible.builtin.command: /usr/local/bin/dbops backups
+      register: verify_backups
+      changed_when: false
+
+    - name: List the dbops timers
+      ansible.builtin.command: systemctl list-timers dbops-* --no-pager  # noqa: command-instead-of-module (read-only; no module lists timers)
+      register: verify_timers
+      changed_when: false
+
+    - name: Show the results
+      ansible.builtin.debug:
+        msg:
+          backup: "{{ verify_backup_log.stdout_lines }}"
+          health: "{{ verify_health.stdout_lines }}"
+          backups: "{{ verify_backups.stdout_lines }}"
+          timers: "{{ verify_timers.stdout_lines }}"
+
+    - name: The newest backup passed its restore test and health sees it
+      ansible.builtin.assert:
+        that:
+          - verify_backup_log.stdout is search('verify PASSED')
+          - verify_health.stdout is search('last verified backup')
+        fail_msg: the backup job or dbops health did not report a verified backup

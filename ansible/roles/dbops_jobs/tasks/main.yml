@@ -1,0 +1,96 @@
+---
+- name: Create the dbops directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ dbops_jobs_home }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ dbops_jobs_home }}/wheels", owner: root, group: root, mode: "0755" }
+    - { path: /etc/dbops, owner: root, group: dbops, mode: "0750" }
+    - { path: "{{ dbops_jobs_backup_dir }}", owner: root, group: dbops, mode: "0750" }
+    # setgid: backups written by mysql stay readable by the dbops group (dbops health reads the manifests)
+    - { path: "{{ dbops_jobs_backup_dir }}/mariadb", owner: mysql, group: dbops, mode: "2750" }
+
+- name: Copy the dbops wheel
+  ansible.builtin.copy:
+    src: "{{ dbops_build_dir }}/{{ dbops_wheel }}"
+    dest: "{{ dbops_jobs_home }}/wheels/{{ dbops_wheel }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# The pip module reports a change under --check even when the version is already
+# installed, so the installed version is read first and pip runs only on a mismatch.
+- name: Read the installed dbops version
+  ansible.builtin.command: "{{ dbops_jobs_home }}/venv/bin/python -c 'import importlib.metadata as m; print(m.version(\"dbops\"))'"
+  register: dbops_jobs_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install dbops in its own virtualenv, version {{ dbops_version }}
+  when: dbops_jobs_installed.stdout | default('') != dbops_version
+  ansible.builtin.pip:
+    name: "dbops=={{ dbops_version }}"
+    virtualenv: "{{ dbops_jobs_home }}/venv"
+    virtualenv_command: python3 -m venv
+    extra_args: --find-links {{ dbops_jobs_home }}/wheels
+
+- name: Write the targets file
+  ansible.builtin.template:
+    src: targets.toml.j2
+    dest: /etc/dbops/targets.toml
+    owner: root
+    group: dbops
+    mode: "0640"
+
+- name: Write the environment file (the monitoring password)
+  ansible.builtin.template:
+    src: dbops.env.j2
+    dest: /etc/dbops/dbops.env
+    owner: root
+    group: dbops
+    mode: "0640"
+  no_log: true
+
+- name: Install the dbops command, the backup job and the alert hook
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - { src: dbops.sh.j2, dest: /usr/local/bin/dbops }
+    - { src: dbops-mariadb-backup.sh.j2, dest: /usr/local/sbin/dbops-mariadb-backup }
+    - { src: dbops-alert.sh.j2, dest: /usr/local/sbin/dbops-alert }
+
+- name: Install the systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - dbops-health.service
+    - dbops-health.timer
+    - dbops-mariadb-backup.service
+    - dbops-mariadb-backup.timer
+    - dbops-alert@.service
+  notify: Reload systemd
+
+- name: Apply pending systemd reloads
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - dbops-health.timer
+    - dbops-mariadb-backup.timer

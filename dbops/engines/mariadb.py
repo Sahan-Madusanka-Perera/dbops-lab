@@ -48,7 +48,7 @@ def _instance(target: Target) -> list[Check]:
 
         def reachable():
             return Check(target.name, "reachable", Status.OK,
-                         detail=f"MariaDB {one('SELECT VERSION() AS v')['v']}, {target.role}")
+                         detail=f"MariaDB {one('SELECT VERSION() AS v')['v']}" + (f", {target.role}" if target.role else ""))
 
         def connections():
             used = int(one("SHOW GLOBAL STATUS LIKE 'Threads_connected'")["Value"])

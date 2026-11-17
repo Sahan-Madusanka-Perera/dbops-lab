@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# dbops-mariadb-backup: a physical backup of this server, then a restore test.
+#
+#   backup   mariadb-backup --backup, then --prepare, into {{ dbops_jobs_backup_dir }}/mariadb/<id>/data
+#   verify   a second mariadbd started on a copy of the prepared backup (no network,
+#            its own socket), every shop table compared with the live server:
+#            row count + CHECKSUM TABLE
+#
+# Writes the same manifest.json as the lab's scripts/backup (M3), so `dbops health`
+# and `dbops backups` read it. Run by dbops-mariadb-backup.service as the mysql
+# user, which logs in through unix_socket. Exits 1 if the backup or its restore
+# test fails, which fails the unit and fires dbops-alert@.
+#
+# The live server is compared after the backup, so a table written to in between
+# shows as a mismatch: on a busy server, compare against a replica stopped at the
+# backup's GTID instead (as the lab does).
+set -euo pipefail
+umask 027
+
+ROOT={{ dbops_jobs_backup_dir }}/mariadb
+KEEP={{ dbops_jobs_backup_keep }}
+MIN_FREE_GB={{ dbops_jobs_backup_min_free_gb }}
+DB=shop
+ID=$(date -u +%Y%m%dT%H%M%SZ)
+DIR=$ROOT/$ID
+SCRATCH=""
+
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+cleanup() {
+  if [[ -n "$SCRATCH" ]]; then
+    mariadb-admin --socket="$SCRATCH/mysqld.sock" shutdown >/dev/null 2>&1 || true
+    rm -rf "$SCRATCH"
+  fi
+}
+trap cleanup EXIT
+
+free_gb=$(( $(df -Pk "$ROOT" | awk 'NR == 2 {print $4}') / 1024 / 1024 ))
+if (( free_gb < MIN_FREE_GB )); then
+  echo "only ${free_gb} GB free in $ROOT, needs ${MIN_FREE_GB} GB: no backup taken" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------- backup
+mkdir -p "$DIR"
+export ID STARTED FINISHED BACKUP_S POSITION SIZE
+STARTED=$(now)
+t0=$SECONDS
+mariadb-backup --backup --target-dir="$DIR/data" >"$DIR/backup.log" 2>&1
+mariadb-backup --prepare --target-dir="$DIR/data" >>"$DIR/backup.log" 2>&1
+BACKUP_S=$((SECONDS - t0))
+FINISHED=$(now)
+POSITION="GTID $(awk '{print $3}' "$DIR/data/mariadb_backup_binlog_info" 2>/dev/null || echo unknown)"
+SIZE=$(du -sb "$DIR/data" | cut -f1)
+echo "backup $ID done in ${BACKUP_S}s, $((SIZE / 1024 / 1024)) MB, $POSITION"
+
+# ---------------------------------------------------------------- restore test
+export VERIFY_S VERIFIED STATUS DETAIL
+t1=$SECONDS
+SCRATCH=$(mktemp -d "$ROOT/.verify-XXXXXX")
+cp -a "$DIR/data" "$SCRATCH/data"
+mariadbd --no-defaults --datadir="$SCRATCH/data" --socket="$SCRATCH/mysqld.sock" \
+  --pid-file="$SCRATCH/mysqld.pid" --log-error="$SCRATCH/error.log" \
+  --skip-networking --skip-grant-tables --innodb-buffer-pool-size=64M &
+for _ in $(seq 60); do
+  mariadb-admin --socket="$SCRATCH/mysqld.sock" ping >/dev/null 2>&1 && break
+  sleep 1
+done
+
+# "<rows> rows, checksum <n>" for one table, on the server behind the given socket ("" = live)
+summary() {
+  local sock=() t=$2
+  [[ -n "$1" ]] && sock=(--socket="$1")
+  local rows sum
+  rows=$(mariadb "${sock[@]}" -N -B -e "SELECT COUNT(*) FROM \`$DB\`.\`$t\`" 2>/dev/null) || return 0
+  sum=$(mariadb "${sock[@]}" -N -B -e "CHECKSUM TABLE \`$DB\`.\`$t\`" 2>/dev/null | cut -f2) || return 0
+  echo "$rows rows, checksum $sum"
+}
+
+ok=1
+compared=0
+: >"$SCRATCH/compare.tsv"
+for t in $(mariadb -N -B -e "SELECT table_name FROM information_schema.tables WHERE table_schema = '$DB' ORDER BY 1"); do
+  src=$(summary "" "$t")
+  dst=$(summary "$SCRATCH/mysqld.sock" "$t")
+  match=false
+  [[ -n "$src" && "$src" == "$dst" ]] && match=true     # empty never matches
+  [[ $match == true ]] || ok=0
+  compared=$((compared + 1))
+  printf '%s\t%s\t%s\t%s\n' "$t" "$src" "${dst:-not restored}" "$match" | tee -a "$SCRATCH/compare.tsv"
+done
+(( compared > 0 )) || ok=0
+
+VERIFY_S=$((SECONDS - t1))
+VERIFIED=$(now)
+if (( ok )); then
+  STATUS=PASSED DETAIL="$compared tables, as of $POSITION"
+else
+  STATUS=FAILED DETAIL="$(awk -F'\t' '$4 == "false" {print $1}' "$SCRATCH/compare.tsv" | paste -sd, -) differ or were not restored"
+  (( compared > 0 )) || DETAIL="no tables to compare: the scratch server or the source is down"
+fi
+
+# ---------------------------------------------------------------- manifest
+python3 - "$DIR/manifest.json" "$SCRATCH/compare.tsv" <<'PY'
+import json, os, sys
+manifest, compare = sys.argv[1], sys.argv[2]
+tables = []
+for line in open(compare):
+    table, source, restored, match = line.rstrip("\n").split("\t")
+    tables.append({"table": table, "source": source, "restored": restored, "match": match == "true"})
+e = os.environ
+json.dump({
+    "engine": "mariadb", "id": e["ID"], "source": os.uname().nodename,
+    "method": "mariadb-backup, prepared",
+    "started_at": e["STARTED"], "finished_at": e["FINISHED"], "backup_seconds": int(e["BACKUP_S"]),
+    "size_bytes": int(e["SIZE"]), "position": e["POSITION"],
+    "verify": {"status": e["STATUS"], "method": "mariadbd on a copy of the prepared backup, row count + CHECKSUM TABLE",
+               "verified_at": e["VERIFIED"], "seconds": int(e["VERIFY_S"]), "detail": e["DETAIL"], "tables": tables},
+}, open(manifest, "w"), indent=2)
+PY
+echo "verify $STATUS in ${VERIFY_S}s: $DETAIL"
+
+# ---------------------------------------------------------------- retention
+# Keep the newest $KEEP, and never delete the newest backup that passed its restore test.
+newest_ok=$(grep -l '"status": "PASSED"' "$ROOT"/2*/manifest.json 2>/dev/null | sort -r | head -1 | xargs -r dirname)
+find "$ROOT" -mindepth 1 -maxdepth 1 -type d -name '2*' | sort -r | tail -n +$((KEEP + 1)) | while read -r old; do
+  [[ "$old" == "$newest_ok" ]] || rm -rf "$old"
+done
+
+[[ $STATUS == PASSED ]]

@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+[Unit]
+Description=dbops: back up MariaDB with mariadb-backup and test the restore
+Requires=mariadb.service
+After=mariadb.service
+OnFailure=dbops-alert@%n.service
+
+[Service]
+Type=oneshot
+# The mysql OS user logs in to MariaDB through unix_socket: no password anywhere.
+User=mysql
+Group=mysql
+SupplementaryGroups=dbops
+ExecStart=/usr/local/sbin/dbops-mariadb-backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+ProtectSystem=strict
+ReadWritePaths={{ dbops_jobs_backup_dir }}
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

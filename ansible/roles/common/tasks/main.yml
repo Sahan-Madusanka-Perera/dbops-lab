@@ -1,0 +1,42 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Harden sshd - keys only, no root, listed users only
+  ansible.builtin.template:
+    src: sshd-dbops.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-dbops.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh
+
+- name: Create the journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Keep the journal across reboots, capped in size
+  ansible.builtin.template:
+    src: journald-dbops.conf.j2
+    dest: /etc/systemd/journald.conf.d/10-dbops.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart journald
+
+- name: Create the dbops service user (runs the health job, cannot log in)
+  ansible.builtin.user:
+    name: dbops
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/dbops
+    create_home: true

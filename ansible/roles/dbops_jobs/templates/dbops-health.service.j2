@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[Unit]
+Description=dbops health: this server's databases, host and last verified backup
+After=mariadb.service
+OnFailure=dbops-alert@%n.service
+
+[Service]
+Type=oneshot
+User=dbops
+Group=dbops
+EnvironmentFile=/etc/dbops/dbops.env
+ExecStart={{ dbops_jobs_home }}/venv/bin/dbops health --no-colour
+# Exit codes are Nagios-style. 1 (WARN) is for the journal; 2 (CRIT) and 3 (UNKNOWN) fail the unit and alert.
+SuccessExitStatus=1
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

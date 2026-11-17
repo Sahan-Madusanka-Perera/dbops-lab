@@ -1,0 +1,5 @@
+---
+# ansible-lint settings: lint our playbooks and roles, not the installed collections.
+profile: production
+exclude_paths:
+  - collections/
