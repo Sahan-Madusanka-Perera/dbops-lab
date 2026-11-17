@@ -5,10 +5,10 @@
 | Container | Engine | Host port | Connect as |
 |---|---|---|---|
 | `dbops-oracle` | Oracle Database 23ai Free, PDB `FREEPDB1` | 1521 | `shop` (app), `system` / `sys` (`ORACLE_PASSWORD`) |
-| `dbops-mariadb-primary` | MariaDB 11.4, binlog + GTID | 3306 | `shop` (app), `root` |
-| `dbops-mariadb-replica` | MariaDB 11.4, `read_only` | 3307 | `root` |
+| `dbops-mariadb-primary` | MariaDB 11.4, binlog + GTID | 3316 | `shop` (app), `root` |
+| `dbops-mariadb-replica` | MariaDB 11.4, `read_only` | 3317 | `root` |
 | `dbops-mongo1..3` | MongoDB 8.0, replica set `rs0` | 27017-27019 | no auth yet (added in M5) |
-| `dbops-postgres` | PostgreSQL 17 + `pg_stat_statements` | 5432 | `postgres` |
+| `dbops-postgres` | PostgreSQL 17 + `pg_stat_statements` | 5442 | `postgres` |
 
 Every engine holds the same `shop` data: 5,000 customers and 50,000 orders. `orders`
 has no index on `customer_id` or `status` on purpose.
@@ -92,7 +92,7 @@ mounted: `make mariadb`, then `SELECT @@log_bin, @@gtid_binlog_pos;`.
 
 ### `port is already allocated`
 
-Something on your machine already uses that port (a local MySQL on 3306 is common).
+Something on your machine already uses that port (the defaults already avoid 3306 and 5432, which a local MySQL or Postgres usually holds).
 Change the port in `.env` and `make up` again.
 
 ### Init scripts did not run

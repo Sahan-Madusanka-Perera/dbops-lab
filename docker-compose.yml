@@ -51,7 +51,7 @@ services:
       MARIADB_USER: shop
       MARIADB_PASSWORD: ${MARIADB_APP_PASSWORD:?set it in .env}
     ports:
-      - "${MARIADB_PRIMARY_PORT:-3306}:3306"
+      - "${MARIADB_PRIMARY_PORT:-3316}:3306"
     volumes:
       - mariadb-primary-data:/var/lib/mysql
       - ./engines/mariadb/primary/conf.d:/etc/mysql/conf.d:ro
@@ -69,7 +69,7 @@ services:
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set it in .env}
     ports:
-      - "${MARIADB_REPLICA_PORT:-3307}:3306"
+      - "${MARIADB_REPLICA_PORT:-3317}:3306"
     volumes:
       - mariadb-replica-data:/var/lib/mysql
       - ./engines/mariadb/replica/conf.d:/etc/mysql/conf.d:ro
@@ -140,7 +140,7 @@ services:
       POSTGRES_DB: shop
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env}
     ports:
-      - "${PG_PORT:-5432}:5432"
+      - "${PG_PORT:-5442}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./engines/postgres/init:/docker-entrypoint-initdb.d:ro
