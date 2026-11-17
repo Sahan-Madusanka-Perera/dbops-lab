@@ -1,0 +1,61 @@
+DBOps access review   2026-11-17 15:45 UTC   policy: policy/access-policy.toml
+CRIT   CRIT 2 · WARN 11   22 accounts can log in, on 5 instances
+
+Findings
+  CRIT      mongo/rs0                -                      auth-disabled       access control is off on mongo1, mongo2, mongo3: anyone who can reach port 27017 can read, change or drop every database
+                                                                                fix: turn on access control and create the approved accounts
+  CRIT      oracle/oracle            PDBADMIN               unapproved-account  not on the approved list, and has admin rights
+                                                                                fix: lock it, or add it to the policy with an owner and a purpose
+  WARN      mariadb/mariadb-primary  -                      login-audit-off     logins are not recorded: server_audit is not logging CONNECT events
+                                                                                fix: plugin_load_add = server_audit, server_audit_events = CONNECT, server_audit_logging = ON
+  WARN      mariadb/mariadb-primary  root@%                 admin-any-host      admin account that can log in from any address
+                                                                                fix: limit it to the hosts DBAs connect from
+  WARN      mariadb/mariadb-primary  shop_app               missing-account     approved app account (the shop application) does not exist: whatever does its job is using another account
+                                                                                fix: create it
+  WARN      mariadb/mariadb-replica  -                      login-audit-off     logins are not recorded: server_audit is not logging CONNECT events
+                                                                                fix: plugin_load_add = server_audit, server_audit_events = CONNECT, server_audit_logging = ON
+  WARN      mariadb/mariadb-replica  root@%                 admin-any-host      admin account that can log in from any address
+                                                                                fix: limit it to the hosts DBAs connect from
+  WARN      mariadb/mariadb-replica  shop_app               missing-account     approved app account (the shop application) does not exist: whatever does its job is using another account
+                                                                                fix: create it
+  WARN      oracle/oracle            -                      login-audit-off     failed logins are not audited (no ORA_LOGON_FAILURES policy)
+                                                                                fix: AUDIT POLICY ORA_LOGON_FAILURES;
+  WARN      oracle/oracle            shop_app               missing-account     approved app account (the shop application) does not exist: whatever does its job is using another account
+                                                                                fix: create it
+  WARN      postgres/postgres        -                      login-audit-off     logins are not recorded: log_connections is off, or not written as jsonlog
+                                                                                fix: log_connections = on, logging_collector = on, log_destination = 'stderr,jsonlog'
+  WARN      postgres/postgres        postgres               admin-any-host      admin account that can log in from any address
+                                                                                fix: limit it to the hosts DBAs connect from
+  WARN      postgres/postgres        shop_app               missing-account     approved app account (the shop application) does not exist: whatever does its job is using another account
+                                                                                fix: create it
+
+Accounts that can log in
+  instance                 account                type       admin ddl  password set       last login        
+  oracle/oracle            SYS                    built-in   yes   yes  -                  -                 
+  oracle/oracle            SYSTEM                 built-in   yes   yes  -                  2026-11-17        
+  oracle/oracle            PDBADMIN               UNAPPROVED yes        2026-08-30 (78d)   -                 
+  oracle/oracle            DBOPS_MONITOR          service               2026-11-17         2026-11-17        
+  oracle/oracle            SHOP                   owner            yes  2026-11-17         2026-11-17        
+  mariadb/mariadb-primary  root@localhost         admin      yes   yes  2026-11-17         -                 
+  mariadb/mariadb-primary  root@%                 admin      yes   yes  2026-11-17         -                 
+  mariadb/mariadb-primary  healthcheck@127.0.0.1  service               2026-11-17         -                 
+  mariadb/mariadb-primary  healthcheck@::1        service               2026-11-17         -                 
+  mariadb/mariadb-primary  healthcheck@localhost  service               2026-11-17         -                 
+  mariadb/mariadb-primary  shop@%                 owner            yes  2026-11-17         -                 
+  mariadb/mariadb-primary  repl@%                 service               2026-11-17         -                 
+  mariadb/mariadb-primary  dbops_monitor@%        service               2026-11-17         -                 
+  mariadb/mariadb-replica  root@localhost         admin      yes   yes  2026-11-17         -                 
+  mariadb/mariadb-replica  root@%                 admin      yes   yes  2026-11-17         -                 
+  mariadb/mariadb-replica  healthcheck@127.0.0.1  service               2026-11-17         -                 
+  mariadb/mariadb-replica  healthcheck@::1        service               2026-11-17         -                 
+  mariadb/mariadb-replica  healthcheck@localhost  service               2026-11-17         -                 
+  mariadb/mariadb-replica  repl@%                 service               2026-11-17         -                 
+  mariadb/mariadb-replica  dbops_monitor@%        service               2026-11-17         -                 
+  postgres/postgres        postgres               admin      yes   yes  -                  -                 
+  postgres/postgres        dbops_monitor          service               -                  -                 
+
+Login records
+  oracle/oracle            DBA_USERS.LAST_LOGIN, since each account was created
+  mariadb/mariadb-primary  none: last login unknown
+  mariadb/mariadb-replica  none: last login unknown
+  postgres/postgres        none: last login unknown

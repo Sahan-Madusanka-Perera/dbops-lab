@@ -19,6 +19,7 @@ make replication        # seed the MariaDB replica, start GTID replication
 make install            # the dbops CLI, in .venv
 make health             # one verdict for all seven instances
 make backup             # back up and restore-test all four engines
+make access             # who can log in where, checked against policy/access-policy.toml
 make                    # list every command
 ```
 
@@ -115,6 +116,59 @@ whose statistics said 77 rows (it has 5,000), and probed `orders` 5,000 times.
 
 The indexes live only in the running lab. `make reset` starts again without them.
 
+## Access review (M5)
+
+`dbops access` lists every account in every engine, with what it can do and when it
+last logged in, and checks each one against [policy/access-policy.toml](policy/access-policy.toml):
+the approved accounts, each with a type (admin, owner, app, service), an owner and a
+purpose. A change to that file is an access change and goes through review like code.
+
+| Rule | Status | Finds |
+|---|---|---|
+| `auth-disabled` | CRIT | an engine anyone can connect to without a login |
+| `no-password`, `default-password` | CRIT | an account that logs in with no password, or the vendor's default |
+| `unapproved-account` | WARN, CRIT if admin | an account nobody approved |
+| `excess-privilege` | WARN, CRIT if admin | an app or service account that can change the schema, or holds admin rights |
+| `missing-account` | WARN | an approved account that does not exist: whatever does its job uses another one |
+| `admin-any-host` | WARN | an admin account that can log in from any address |
+| `password-age`, `unused-account` | WARN | password older than 90 days (service accounts: 365), no login in 90 days |
+| `failed-logins` | WARN | 10 or more failed logins on record |
+| `login-audit-off` | WARN | logins (or failed logins) not recorded, so the last two cannot be answered |
+
+A finding can be accepted in the policy with a reason, who accepted it and an expiry
+date; it is then reported as ACCEPTED until that date. `--markdown` writes the review
+as an evidence report with a sign-off table, `--json` includes locked accounts too.
+
+| | Accounts from | Last login from |
+|---|---|---|
+| Oracle | `DBA_USERS`, roles (recursive), system and 23ai schema privileges | `DBA_USERS.LAST_LOGIN`; failed logins: unified audit `ORA_LOGON_FAILURES` |
+| MariaDB | `mysql.global_priv`, `information_schema` grants | `server_audit` plugin, CONNECT events |
+| MongoDB | `usersInfo` with inherited privileges | the mongod log (Community has no audit log) |
+| PostgreSQL | `pg_authid`, role membership, `pg_hba_file_rules`, table grants | `log_connections`, written as JSON |
+
+The first review of the lab ([before](results/m5-access-before.md)) was **CRIT**, 2 critical, 11 warnings:
+
+- MongoDB ran without access control: anyone reaching port 27017 could drop every database;
+- Oracle `PDBADMIN`, an admin account nobody approved, had never logged in;
+- no engine had a least-privilege app account: the workload ran as the schema owner
+  (Oracle, MariaDB) or the superuser (PostgreSQL);
+- MariaDB and PostgreSQL did not record logins; Oracle did not audit failed logins;
+- MariaDB `root` and PostgreSQL `postgres` accept logins from any address.
+
+Fixed by `scripts/create-accounts.sh` and the engine config: a keyfile turns on
+MongoDB access control, with `dbops_admin`, `dbops_monitor` and `shop_app`;
+`shop_app` in every engine can read and write the shop data and is refused any DDL
+(MongoDB needs a custom role for that: the built-in `readWrite` can drop collections);
+`PDBADMIN` is locked; `server_audit`, `log_connections` and `ORA_LOGON_FAILURES` are on.
+Admin logins from any address are accepted risks: everything reaches the lab through
+Docker's port mapping, so an address limit would not tell anyone apart.
+
+[After](results/m5-access-after.md): **WARN**, 1 finding, 4 accepted. The finding is real: 12 failed
+`shop_app` logins on the MariaDB primary, made on purpose to test the rule
+([results/m5-access-faults.txt](results/m5-access-faults.txt) also catches a contractor role
+nobody approved and an app account given `readWrite`). Audit records are not deleted
+to make a report look clean.
+
 Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## Milestones
@@ -135,12 +189,14 @@ Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.m
 engines/     one folder per database engine: config and init scripts the containers mount
 scripts/     shell scripts for operations, grouped by engine; backup/ has one script per engine
 backups/     where backups land (git-ignored), one folder per engine
-dbops/       the Python CLI: health (M2); backup verification, slow queries, access review to come
+dbops/       the Python CLI: health (M2), backups (M3), slow and workload (M4), access (M5)
+policy/      access-policy.toml: the approved accounts, their owners, and accepted risks
 tests/       unit tests (no databases needed) and live tests against the lab
 drills/      scripts that cause an incident on purpose (M7)
 ansible/     inventory, playbooks and roles for a Linux VM (M6)
 docs/        RUNBOOK.md, plus incidents/ for postmortems
-results/     measured output: health snapshots, restore timings, query plans
+results/     measured output: health snapshots, restore timings, query plans, access reviews
+secrets/     generated by make (git-ignored): the MongoDB replica set keyfile
 ```
 
 ## Conventions

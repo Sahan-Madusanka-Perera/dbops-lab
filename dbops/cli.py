@@ -7,6 +7,8 @@
     dbops backups                      every backup on disk and its restore test result
     dbops workload --seconds 30        run the sample application queries against every engine
     dbops slow                         worst statements per engine, their plans, index suggestions
+    dbops access                       every account and privilege, checked against policy/access-policy.toml
+    dbops access --markdown            the same as an evidence report for auditors
 
 Exit codes follow the Nagios plugin convention:
     0 OK   1 WARN   2 CRIT   3 UNKNOWN (including a usage error)
@@ -24,6 +26,8 @@ from .health import collect
 from .model import Status, worst
 from .render import as_json, as_text
 from . import workload
+from .access import load_policy
+from .access import report as access_report
 from .slow import report as slow_report
 
 
@@ -60,6 +64,12 @@ def _parser() -> argparse.ArgumentParser:
     out.add_argument("--json", action="store_true", help="print JSON")
     out.add_argument("--ddl", action="store_true", help="print only the suggested fixes, as a script to review")
     out.add_argument("--reset", action="store_true", help="clear the collected statistics, to measure from now")
+
+    access = sub.add_parser("access", help="review accounts, roles and privileges against the approved list")
+    access.add_argument("--engine", action="append", choices=ENGINES, help="limit to one engine (repeatable)")
+    fmt = access.add_mutually_exclusive_group()
+    fmt.add_argument("--json", action="store_true", help="print JSON, including locked accounts")
+    fmt.add_argument("--markdown", action="store_true", help="print an evidence report with a sign-off table")
     return parser
 
 
@@ -76,6 +86,13 @@ def main(argv: list[str] | None = None) -> int:
         print(slow_report.as_json(results) if args.json else
               slow_report.as_ddl(results) if args.ddl else slow_report.as_text(results, args.top))
         return 1 if any(src.startswith("error") for _, _, src in results) else 0
+    if args.command == "access":
+        policy = load_policy()
+        instances, findings = access_report.review(args.engine, policy)
+        print(access_report.as_json(instances, findings) if args.json else
+              access_report.as_markdown(instances, findings, policy) if args.markdown else
+              access_report.as_text(instances, findings, policy))
+        return int(access_report.verdict(findings))
     if args.command == "workload":
         results = workload.run(args.engine, args.seconds)
         print(workload.as_text(results, args.seconds))

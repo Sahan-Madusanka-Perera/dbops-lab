@@ -32,6 +32,7 @@ def run(targets: list[Target]) -> list[Check]:
 
 def _client(target: Target) -> MongoClient:
     return MongoClient(target.host, target.port, directConnection=True,
+                       username=target.user or None, password=target.password or None, authSource="admin",
                        serverSelectionTimeoutMS=CONNECT_TIMEOUT_S * 1000,
                        connectTimeoutMS=CONNECT_TIMEOUT_S * 1000)
 

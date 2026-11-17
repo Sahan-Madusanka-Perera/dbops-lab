@@ -1,0 +1,123 @@
+# Approved database accounts for the DBOps Lab, read by `dbops access`.
+#
+# Every account that can log in must be listed here with an owner and a purpose,
+# or the review reports it. Accounts shipped with the engine (Oracle-maintained
+# users such as SYS, MariaDB's mariadb.sys) are known and not listed.
+#
+# type    admin    may hold admin rights
+#         owner    owns the application schema; for migrations, not for the app
+#         app      what the application connects as: read and write data, nothing else
+#         service  a tool or a process (monitoring, replication, health checks)
+#
+# A change to this file is an access change: it goes through review like code.
+
+max_password_age_days = 90     # people; service accounts set their own below
+unused_after_days = 90
+failed_logins_warn = 10
+
+# ---------------------------------------------------------------- every engine
+
+[[account]]
+name = "dbops_monitor"
+type = "service"
+purpose = "read-only monitoring for dbops health"
+owner = "DBA team"
+engines = ["oracle", "mariadb", "mongo", "postgres"]
+max_password_age_days = 365
+
+[[account]]
+name = "shop_app"
+type = "app"
+purpose = "the shop application"
+owner = "Shop team"
+engines = ["oracle", "mariadb", "mongo", "postgres"]
+max_password_age_days = 365
+
+# ---------------------------------------------------------------- Oracle (FREEPDB1)
+
+[[account]]
+name = "SHOP"
+type = "owner"
+purpose = "owns the SHOP schema; schema migrations"
+owner = "Shop team"
+engines = ["oracle"]
+
+# ---------------------------------------------------------------- MariaDB
+
+[[account]]
+name = "root"
+type = "admin"
+purpose = "DBA administration and the dbops tools"
+owner = "DBA team"
+engines = ["mariadb"]
+
+[[account]]
+name = "shop"
+type = "owner"
+purpose = "owns the shop database; schema migrations"
+owner = "Shop team"
+engines = ["mariadb"]
+instances = ["mariadb-primary"]
+
+[[account]]
+name = "repl"
+type = "service"
+purpose = "replication from the primary to the replica"
+owner = "DBA team"
+engines = ["mariadb"]
+max_password_age_days = 365
+
+[[account]]
+name = "healthcheck"
+type = "service"
+purpose = "the container's own health check, localhost only"
+owner = "DBA team"
+engines = ["mariadb"]
+max_password_age_days = 365
+
+# ---------------------------------------------------------------- MongoDB
+
+[[account]]
+name = "dbops_admin"
+type = "admin"
+purpose = "DBA administration, backups and the dbops tools"
+owner = "DBA team"
+engines = ["mongo"]
+
+# ---------------------------------------------------------------- PostgreSQL
+
+[[account]]
+name = "postgres"
+type = "admin"
+purpose = "DBA administration and the dbops tools"
+owner = "DBA team"
+engines = ["postgres"]
+
+# ---------------------------------------------------------------- accepted risks
+#
+# A finding listed here is reported as ACCEPTED, with the reason, until it expires.
+# Review each one before it expires: extend it with a new reason, or fix the finding.
+
+[[exception]]
+engine = "mariadb"
+account = "root@%"
+rule = "admin-any-host"
+reason = "the dbops tools and DBAs reach the lab through Docker's port mapping, so every connection comes from the Docker gateway and a host limit would not tell anyone apart; in production, limit admins to the bastion subnet"
+approved_by = "DBA lead"
+expires = 2027-05-17
+
+[[exception]]
+engine = "postgres"
+account = "postgres"
+rule = "admin-any-host"
+reason = "as for MariaDB root@%: all connections arrive through Docker's port mapping"
+approved_by = "DBA lead"
+expires = 2027-05-17
+
+[[exception]]
+engine = "mongo"
+account = "dbops_admin"
+rule = "admin-any-host"
+reason = "as for MariaDB root@%: all connections arrive through Docker's port mapping"
+approved_by = "DBA lead"
+expires = 2027-05-17

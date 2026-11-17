@@ -35,7 +35,8 @@ def _since() -> datetime:
 def _members(env: dict):
     for t in targets(env):
         if t.engine == "mongo":
-            yield t.name, MongoClient(t.host, t.port, directConnection=True, serverSelectionTimeoutMS=5000)
+            yield t.name, MongoClient(t.host, t.port, directConnection=True, serverSelectionTimeoutMS=5000,
+                                      username=t.user, password=t.password, authSource="admin")
 
 
 def filter_of(command: dict) -> dict:

@@ -3,7 +3,8 @@
 #   oracle            Oracle Database 23ai Free, app schema SHOP in FREEPDB1
 #   mariadb-primary   MariaDB 11.4 LTS, binlog + GTID, slow query log on
 #   mariadb-replica   read-only replica; wired up by scripts/mariadb/setup-replication.sh
-#   mongo1..3         replica set rs0; mongo-init initiates it and seeds shop.orders
+#   mongo1..3         replica set rs0 with access control (keyfile); make up runs
+#                     engines/mongo/init-replica-set.js on mongo1 to initiate, create users, seed
 #   postgres          PostgreSQL 17 with pg_stat_statements
 #
 # ./backups/<engine> is mounted at /backups where that engine's backup runs (M3):
@@ -17,7 +18,15 @@ name: dbops-lab
 
 x-mongo-node: &mongo-node
   image: mongo:8.0
-  command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+  # --keyFile turns on access control, and members authenticate to each other with it.
+  # mongod refuses a keyfile others can read or that it does not own, and a bind
+  # mount keeps the host's owner, so a copy is made for the mongodb user first.
+  entrypoint:
+    - bash
+    - -c
+    - >-
+      install -m 400 -o mongodb -g mongodb /run/secrets/mongo-keyfile /tmp/mongo-keyfile &&
+      exec docker-entrypoint.sh mongod --replSet rs0 --bind_ip_all --keyFile /tmp/mongo-keyfile
   healthcheck:
     test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
     interval: 5s
@@ -97,6 +106,8 @@ services:
       - "${MONGO1_PORT:-27017}:27017"
     volumes:
       - mongo1-data:/data/db
+      - ./secrets/mongo-keyfile:/run/secrets/mongo-keyfile:ro
+      - ./engines/mongo:/scripts:ro
 
   mongo2:
     <<: *mongo-node
@@ -106,6 +117,7 @@ services:
       - "${MONGO2_PORT:-27018}:27017"
     volumes:
       - mongo2-data:/data/db
+      - ./secrets/mongo-keyfile:/run/secrets/mongo-keyfile:ro
       - ./backups/mongo:/backups
 
   mongo3:
@@ -116,21 +128,7 @@ services:
       - "${MONGO3_PORT:-27019}:27017"
     volumes:
       - mongo3-data:/data/db
-
-  # One-shot, run by `make up` after the nodes are healthy: initiates rs0 on the
-  # first run and reports its members on every run after. The profile keeps it
-  # out of a plain `docker compose up`, whose --wait would treat its exit as a failure.
-  mongo-init:
-    image: mongo:8.0
-    profiles: ["init"]
-    command: ["mongosh", "--host", "mongo1:27017", "--quiet", "/scripts/init-replica-set.js"]
-    volumes:
-      - ./engines/mongo:/scripts:ro
-    depends_on:
-      mongo1: { condition: service_healthy }
-      mongo2: { condition: service_healthy }
-      mongo3: { condition: service_healthy }
-    restart: "no"
+      - ./secrets/mongo-keyfile:/run/secrets/mongo-keyfile:ro
 
   postgres:
     image: postgres:17
@@ -143,6 +141,19 @@ services:
       - pg_stat_statements.track=all
       - -c
       - log_min_duration_statement=500
+      # Who logged in and when, for dbops access (M5): JSON files in $PGDATA/log, one per weekday
+      - -c
+      - log_connections=on
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=stderr,jsonlog
+      - -c
+      - log_filename=postgresql-%a.log
+      - -c
+      - log_rotation_age=1d
+      - -c
+      - log_truncate_on_rotation=on
     environment:
       POSTGRES_DB: shop
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env}

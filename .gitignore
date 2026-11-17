@@ -19,3 +19,6 @@ ansible/inventory.ini
 
 # dbops local state (slow --reset markers)
 .dbops/
+
+# Generated secrets (make secrets): the MongoDB replica set keyfile
+secrets/

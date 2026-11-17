@@ -4,11 +4,14 @@
 
 | Container | Engine | Host port | Connect as |
 |---|---|---|---|
-| `dbops-oracle` | Oracle Database 23ai Free, PDB `FREEPDB1` | 1521 | `shop` (app), `system` / `sys` (`ORACLE_PASSWORD`) |
-| `dbops-mariadb-primary` | MariaDB 11.4, binlog + GTID | 3316 | `shop` (app), `root` |
-| `dbops-mariadb-replica` | MariaDB 11.4, `read_only` | 3317 | `root` |
-| `dbops-mongo1..3` | MongoDB 8.0, replica set `rs0` | 27017-27019 | no auth yet (added in M5) |
-| `dbops-postgres` | PostgreSQL 17 + `pg_stat_statements` | 5442 | `postgres` |
+| `dbops-oracle` | Oracle Database 23ai Free, PDB `FREEPDB1` | 1521 | `shop_app` (app), `shop` (schema owner), `system` / `sys` (`ORACLE_PASSWORD`) |
+| `dbops-mariadb-primary` | MariaDB 11.4, binlog + GTID, `server_audit` | 3316 | `shop_app` (app), `shop` (schema owner), `root` |
+| `dbops-mariadb-replica` | MariaDB 11.4, `read_only`, `server_audit` | 3317 | `shop_app`, `root` |
+| `dbops-mongo1..3` | MongoDB 8.0, replica set `rs0`, access control (keyfile) | 27017-27019 | `shop_app` (app), `dbops_admin`; `authSource=admin` |
+| `dbops-postgres` | PostgreSQL 17 + `pg_stat_statements`, connection log | 5442 | `shop_app` (app), `postgres` |
+
+`dbops_monitor` (read-only) exists in every engine. Every account that can log in is
+listed, with its owner, in `policy/access-policy.toml`.
 
 Every engine holds the same `shop` data: 5,000 customers and 50,000 orders. `orders`
 has no index on `customer_id` or `status` on purpose.
@@ -43,7 +46,7 @@ make down
 make oracle            # SQL*Plus as SHOP
 make mariadb           # primary
 make mariadb-replica   # replica
-make mongo             # mongosh on whichever node is primary
+make mongo             # mongosh on whichever node is primary, as dbops_admin
 make psql
 ```
 
@@ -70,7 +73,7 @@ make health      # or: .venv/bin/dbops health --watch 30
 ```
 
 `dbops health` connects as `dbops_monitor`, which `make up` creates (or
-`make monitor-users` after a password change). What to do when a check fails:
+`make accounts` after a password change). What to do when a check fails:
 
 | Check | Status | First move |
 |---|---|---|
@@ -136,7 +139,30 @@ Where the data comes from, and how to clear it, per engine:
 | MongoDB | `system.profile` in `shop`, each member | records the time in `.dbops/mongo-profile-since`; older entries are ignored (a secondary cannot drop the collection) |
 | PostgreSQL | `pg_stat_statements` | `pg_stat_statements_reset()` |
 
-### 2.8 Start again from empty
+### 2.8 Access review
+
+Quarterly, and after any access change:
+
+```bash
+make access                                   # findings, accounts, where login records come from
+make access a=--markdown > results/access-$(date +%F).md    # the evidence report, for sign-off
+```
+
+1. CRIT first: an engine without access control, an account with no or a default
+   password, an admin account nobody approved, an app account with admin rights.
+2. For each `unapproved-account`: find the owner. Approve it (add it to
+   `policy/access-policy.toml` with an owner and a purpose, through a pull request)
+   or lock it. Lock first if nobody claims it within a day:
+   `ALTER USER x ACCOUNT LOCK` (Oracle, MariaDB), `ALTER ROLE x NOLOGIN` (PostgreSQL),
+   `db.revokeRolesFromUser` / `db.dropUser` (MongoDB).
+3. A risk that stays (`admin-any-host` in this lab) gets an `[[exception]]` with the
+   reason, who accepted it and an expiry date no more than six months out.
+4. Sign the report (reviewer and data owner) and keep it.
+
+Rotate a password: change it in `.env`, then `make accounts`, then restart whatever
+uses it. `make accounts` resets every approved account to `.env`.
+
+### 2.9 Start again from empty
 
 ```bash
 make reset    # deletes every volume; asks first
@@ -144,6 +170,20 @@ make up && make replication
 ```
 
 ## 3. Troubleshooting
+
+### MongoDB says `requires authentication` or `Authentication failed`
+
+Access control is on (M5). Connect as `dbops_admin`, `shop_app` or `dbops_monitor`
+with `authSource=admin`; passwords are in `.env`. If no user works on a lab that
+predates M5, the users were never created: `make accounts` creates `dbops_admin`
+through the localhost exception (allowed only while no user exists), then the rest.
+
+### A MongoDB member keeps restarting: `permissions on ... are too open` or `keyfile`
+
+The replica set keyfile is `secrets/mongo-keyfile`, made by `make up`. Each member
+copies it to `/tmp` owned by `mongodb` with mode 400 before it starts mongod. If it
+is missing: `make secrets/mongo-keyfile`. All three members need the same file:
+after replacing it, restart all three.
 
 ### A new index made a query slower
 

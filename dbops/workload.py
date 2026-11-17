@@ -8,8 +8,8 @@ seed, so two runs are comparable (before and after an index, say):
   pending_totals        10%  totals for one order status     (no index on status)
   recent_orders          5%  orders from the last day        (no index on created_at)
 
-Connects as the application would: SHOP in Oracle and MariaDB, postgres in
-PostgreSQL, no auth in MongoDB (until M5).
+Connects as the application does: shop_app in every engine, which can read and
+write the shop data and nothing else (M5, scripts/create-accounts.sh).
 """
 
 from __future__ import annotations
@@ -83,16 +83,17 @@ def _run_sql(engine: str, env: dict, seconds: float, seed: int) -> Result:
     try:
         if engine == "oracle":
             import oracledb
-            conn = oracledb.connect(user="shop", password=env["ORACLE_APP_PASSWORD"],
+            conn = oracledb.connect(user="shop_app", password=env["APP_PASSWORD"],
                                     dsn=f"{host}:{env.get('ORACLE_PORT', 1521)}/FREEPDB1")
+            conn.current_schema = "SHOP"     # the tables are SHOP's; shop_app only has DML on them
         elif engine == "mariadb":
             import pymysql
-            conn = pymysql.connect(host=host, port=int(env.get("MARIADB_PRIMARY_PORT", 3316)), user="shop",
-                                   password=env["MARIADB_APP_PASSWORD"], database="shop", autocommit=True)
+            conn = pymysql.connect(host=host, port=int(env.get("MARIADB_PRIMARY_PORT", 3316)), user="shop_app",
+                                   password=env["APP_PASSWORD"], database="shop", autocommit=True)
         else:
             import psycopg
             conn = psycopg.connect(host=host, port=int(env.get("PG_PORT", 5442)), dbname="shop",
-                                   user="postgres", password=env["POSTGRES_PASSWORD"], autocommit=True)
+                                   user="shop_app", password=env["APP_PASSWORD"], autocommit=True)
     except Exception as e:  # noqa: BLE001 - reported, the other engines carry on
         result.error = str(e).splitlines()[0][:160]
         return result
@@ -116,7 +117,8 @@ def _run_mongo(env: dict, seconds: float, seed: int) -> Result:
 
     result, rng = Result("mongo"), random.Random(seed)
     client = MongoClient(env.get("DBOPS_HOST", "127.0.0.1"), int(env.get("MONGO1_PORT", 27017)),
-                         directConnection=True, serverSelectionTimeoutMS=5000)
+                         directConnection=True, serverSelectionTimeoutMS=5000,
+                         username="shop_app", password=env["APP_PASSWORD"], authSource="admin")
     db = client.shop
     queries = {
         "orders_for_customer": lambda: list(db.orders.find({"customerId": rng.randint(1, CUSTOMERS)})

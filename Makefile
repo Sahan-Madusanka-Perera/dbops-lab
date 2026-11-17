@@ -6,16 +6,15 @@ export
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs replication monitor-users archivelog backup backups install health workload slow test test-live oracle mariadb mariadb-replica mongo psql reset
+.PHONY: help up down ps logs replication accounts archivelog backup backups install health workload slow access test test-live oracle mariadb mariadb-replica mongo psql reset
 
 help: ## List the commands
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
 
-up: .env ## Start every engine, wait until each is healthy, initiate the Mongo replica set
+up: .env secrets/mongo-keyfile ## Start every engine, wait until each is healthy, initiate Mongo, create the accounts
 	mkdir -p backups/oracle backups/mariadb backups/mongo backups/postgres
 	$(COMPOSE) up -d --wait --wait-timeout 600
-	$(COMPOSE) run --rm mongo-init
-	scripts/create-monitor-users.sh
+	scripts/create-accounts.sh
 	scripts/oracle/enable-archivelog.sh > /dev/null
 
 down: ## Stop the lab, keep the data
@@ -30,8 +29,13 @@ logs: ## Follow logs; pick one with: make logs s=oracle
 replication: ## Seed the MariaDB replica from the primary and start GTID replication
 	scripts/mariadb/setup-replication.sh
 
-monitor-users: ## Create or update the read-only dbops_monitor account in each engine
-	scripts/create-monitor-users.sh
+accounts: ## Create or update the approved accounts (dbops_monitor, shop_app) and rotate their passwords
+	scripts/create-accounts.sh
+
+# The replica set's shared secret: members prove to each other they belong. Never committed.
+secrets/mongo-keyfile:
+	mkdir -p secrets
+	umask 077 && openssl rand -base64 756 > $@
 
 archivelog: ## Put Oracle in ARCHIVELOG mode and set RMAN defaults (make up does this)
 	scripts/oracle/enable-archivelog.sh
@@ -59,6 +63,9 @@ workload: ## Run the application query mix for 30 s and report latency; make wor
 slow: ## Slowest statements per engine with index suggestions; make slow a=--ddl, a=--reset
 	.venv/bin/dbops slow $(a)
 
+access: ## Access review against policy/access-policy.toml; make access a=--markdown for the evidence report
+	.venv/bin/dbops access $(a)
+
 test: ## Unit tests, no databases needed
 	.venv/bin/pytest -q
 
@@ -74,8 +81,8 @@ mariadb: ## MariaDB client on the primary, shop database
 mariadb-replica: ## MariaDB client on the replica, as root
 	docker exec -it -e MYSQL_PWD="$(MARIADB_ROOT_PASSWORD)" dbops-mariadb-replica mariadb -uroot shop
 
-mongo: ## mongosh on the rs0 primary, shop database
-	docker exec -it dbops-mongo1 mongosh "mongodb://mongo1,mongo2,mongo3/shop?replicaSet=rs0"
+mongo: ## mongosh on the rs0 primary, shop database, as dbops_admin
+	docker exec -it dbops-mongo1 mongosh "mongodb://dbops_admin:$(MONGO_ADMIN_PASSWORD)@mongo1,mongo2,mongo3/shop?replicaSet=rs0&authSource=admin"
 
 psql: ## psql into shop
 	docker exec -it dbops-postgres psql -U postgres -d shop
