@@ -1,0 +1,17 @@
+# Local secrets: copy .env.example to .env
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Backups are produced by the lab, never committed (M3)
+backups/
+
+# Ansible
+ansible/*.retry
+ansible/inventory.ini
+
+.DS_Store
