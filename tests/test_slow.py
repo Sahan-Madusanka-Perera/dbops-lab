@@ -132,6 +132,27 @@ def test_postgres_plan_sort_key_goes_to_its_scan():
     assert scans == [Scan("orders", "full scan", ["customer_id"], [("created_at", -1)], [], table_rows=50000)]
 
 
+def test_postgres_index_scan_then_filter_is_a_candidate():
+    # INC-004: with (customer_id, created_at) dropped, the generic plan walks the
+    # created_at index backwards and throws away every other customer's rows.
+    plan = {"Node Type": "Limit", "Plans": [
+        {"Node Type": "Index Scan", "Scan Direction": "Backward", "Index Name": "ix_orders_created_at",
+         "Relation Name": "orders", "Alias": "orders", "Filter": "(customer_id = $1)"}]}
+    sql = "SELECT id FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 20"
+    summary, [scan] = postgres_plan(plan, {"orders": 50000}, sql)
+    assert summary == "Limit > Index Scan on orders"
+    assert (scan.eq, scan.sort) == (["customer_id"], [("created_at", -1)])
+    assert scan.reason == "index scan on ix_orders_created_at then filter"
+    assert finish(Statement("postgres", sql, 1, 1.0, scans=[scan])).fixes == [
+        "CREATE INDEX ix_orders_customer_id_created_at ON orders (customer_id, created_at);"]
+
+
+def test_postgres_index_scan_whose_filter_is_only_a_range_is_left_alone():
+    plan = {"Node Type": "Index Scan", "Index Name": "ix_orders_customer_id", "Relation Name": "orders",
+            "Index Cond": "(customer_id = $1)", "Filter": "(total_cents > $2)"}
+    assert postgres_plan(plan, {"orders": 50000})[1] == []
+
+
 # ---------------------------------------------------------------- MongoDB
 
 
@@ -142,3 +163,4 @@ def test_mongo_filter_split_and_shape():
         "query orders {customerId: ?, createdAt: <range>} sort {createdAt: -1} limit 20")
     agg = {"aggregate": "orders", "pipeline": [{"$match": {"status": "PENDING"}}, {"$group": {}}, {"$sort": {}}]}
     assert shape("command", agg) == "aggregate orders {status: ?} > $group > $sort"
+

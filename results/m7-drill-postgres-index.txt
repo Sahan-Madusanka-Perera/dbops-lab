@@ -1,0 +1,141 @@
+### 2026-11-17T16:24:29Z baseline: dbops workload --engine postgres --seconds 20
+Workload: 20 s per engine, all engines at once, seed fixed
+
+  engine    query                  calls   p50 ms   p95 ms  calls/s
+  postgres  orders_for_customer    43729     0.15     0.20   2186.4
+  postgres  customer_by_email      18136     0.14     0.19    906.8
+  postgres  pending_totals          7273     1.27     1.67    363.6
+  postgres  recent_orders           3566     0.16     0.22    178.3
+
+### 16:24:49 inject
+16:24:50  drill start: ix_orders_customer_id_created_at present, valid
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.092..0.093 rows=10 loops=1)
+   Buffers: shared hit=15
+   ->  Sort (actual time=0.091..0.092 rows=10 loops=1)
+         Sort Key: created_at DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=15
+         ->  Bitmap Heap Scan on orders (actual time=0.026..0.071 rows=10 loops=1)
+               Recheck Cond: (customer_id = 42)
+               Heap Blocks: exact=10
+               Buffers: shared hit=12
+               ->  Bitmap Index Scan on ix_orders_customer_id_created_at (actual time=0.020..0.020 rows=10 loops=1)
+                     Index Cond: (customer_id = 42)
+                     Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=148
+ Planning Time: 0.339 ms
+ Execution Time: 0.127 ms
+(17 rows)
+
+16:24:50  DROP INDEX CONCURRENTLY ix_orders_customer_id_created_at
+16:24:50  now: ix_orders_customer_id_created_at missing
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Limit (actual time=1.214..1.215 rows=10 loops=1)
+   Buffers: shared hit=371
+   ->  Sort (actual time=1.213..1.214 rows=10 loops=1)
+         Sort Key: created_at DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=371
+         ->  Seq Scan on orders (actual time=0.004..1.200 rows=10 loops=1)
+               Filter: (customer_id = 42)
+               Rows Removed by Filter: 49990
+               Buffers: shared hit=368
+ Planning:
+   Buffers: shared hit=131
+ Planning Time: 0.140 ms
+ Execution Time: 1.233 ms
+(14 rows)
+
+
+### 16:24:50 dbops health --engine postgres
+OK      8 OK, 0 WARN, 0 CRIT, 0 UNKNOWN
+
+### 16:24:53 dbops workload --engine postgres --seconds 20 (index dropped)
+Workload: 20 s per engine, all engines at once, seed fixed
+
+  engine    query                  calls   p50 ms   p95 ms  calls/s
+  postgres  orders_for_customer    13190     1.16     1.32    659.5
+  postgres  customer_by_email       5446     0.17     0.23    272.3
+  postgres  pending_totals          2162     1.31     1.71    108.1
+  postgres  recent_orders           1071     0.19     0.26     53.5
+
+### 16:25:13 dbops slow --engine postgres
+DBOps slow queries   top 3 per engine, ranked by total time
+
+postgres   pg_stat_statements since its last reset
+  #1  13,190 calls   total 13,114 ms   mean 0.99 ms   368 blocks/call
+      SELECT id, status, total_cents, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMI...
+      plan  Limit > Index Scan on orders
+  #2  2,162 calls   total 2,434 ms   mean 1.13 ms   416 blocks/call
+      SELECT c.country, count(*), sum(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  Aggregate > Hash Join > Bitmap Heap Scan on orders > Bitmap Index Scan > Hash > Seq Scan on customers
+  #3  5,446 calls   total 28 ms   mean 0.01 ms   3 blocks/call
+      SELECT id, country FROM customers WHERE email = $1
+      plan  Index Scan on customers
+
+### 16:25:58 dbops slow --engine postgres, with the index-scan-then-filter rule added in M7
+DBOps slow queries   top 1 per engine, ranked by total time
+
+postgres   pg_stat_statements since its last reset
+  #1  13,190 calls   total 13,114 ms   mean 0.99 ms   368 blocks/call
+      SELECT id, status, total_cents, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMI...
+      plan  Limit > Index Scan on orders
+      why   index scan on ix_orders_created_at then filter of orders (50,000 rows), filtering on customer_id, sorting by created_at
+      fix   CREATE INDEX ix_orders_customer_id_created_at ON orders (customer_id, created_at);
+
+### 16:26:07 fix, with dbops workload --engine postgres --seconds 10 running alongside
+16:26:09  before: ix_orders_customer_id_created_at missing
+16:26:09  built in 0 s: ix_orders_customer_id_created_at present, valid
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.036..0.036 rows=10 loops=1)
+   Buffers: shared hit=15
+   ->  Sort (actual time=0.035..0.036 rows=10 loops=1)
+         Sort Key: created_at DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=15
+         ->  Bitmap Heap Scan on orders (actual time=0.008..0.028 rows=10 loops=1)
+               Recheck Cond: (customer_id = 42)
+               Heap Blocks: exact=10
+               Buffers: shared hit=12
+               ->  Bitmap Index Scan on ix_orders_customer_id_created_at (actual time=0.006..0.006 rows=10 loops=1)
+                     Index Cond: (customer_id = 42)
+                     Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=148
+ Planning Time: 0.142 ms
+ Execution Time: 0.048 ms
+(17 rows)
+
+-- workload during the rebuild:
+Workload: 10 s per engine, all engines at once, seed fixed
+
+  engine    query                  calls   p50 ms   p95 ms  calls/s
+  postgres  orders_for_customer    18527     0.15     1.14   1852.7
+  postgres  customer_by_email       7684     0.14     0.20    768.4
+  postgres  pending_totals          3070     1.28     1.58    307.0
+  postgres  recent_orders           1506     0.17     0.24    150.6
+
+### 16:26:17 dbops workload --engine postgres --seconds 20 (index rebuilt)
+Workload: 20 s per engine, all engines at once, seed fixed
+
+  engine    query                  calls   p50 ms   p95 ms  calls/s
+  postgres  orders_for_customer    44335     0.15     0.20   2216.8
+  postgres  customer_by_email      18410     0.14     0.19    920.5
+  postgres  pending_totals          7370     1.29     1.52    368.5
+  postgres  recent_orders           3610     0.16     0.21    180.5
+
+### 16:26:37 dbops slow --engine postgres --top 1
+DBOps slow queries   top 1 per engine, ranked by total time
+
+postgres   pg_stat_statements since its last reset
+  #1  7,370 calls   total 8,291 ms   mean 1.12 ms   416 blocks/call
+      SELECT c.country, count(*), sum(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  Aggregate > Hash Join > Bitmap Heap Scan on orders > Bitmap Index Scan > Hash > Seq Scan on customers
+
+### 16:26:37 cleanup
+16:26:37  ix_orders_customer_id_created_at present, valid: nothing to do

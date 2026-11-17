@@ -14,7 +14,7 @@ import re
 
 import psycopg
 
-from . import Scan, Statement, explain_scan, finish, parse_predicates, parse_sort_keys
+from . import Scan, Statement, explain_scan, finish, parse_order_by, parse_predicates, parse_sort_keys
 
 TOP_SQL = """
 SELECT s.query, s.calls, s.total_exec_time, (s.shared_blks_hit + s.shared_blks_read)::float / NULLIF(s.calls, 0)
@@ -44,7 +44,7 @@ def collect(env: dict, top: int) -> tuple[list[Statement], str]:
             try:
                 plan = cur.execute(f"EXPLAIN (GENERIC_PLAN, FORMAT JSON) {explainable(query)}").fetchone()[0]
                 plan = plan if isinstance(plan, list) else json.loads(plan)
-                st.plan, st.scans = read_plan(plan[0]["Plan"], reltuples)
+                st.plan, st.scans = read_plan(plan[0]["Plan"], reltuples, query)
             except psycopg.Error as e:
                 st.notes.append(f"could not EXPLAIN: {str(e).splitlines()[0][:100]}")
             for scan in st.scans:
@@ -58,28 +58,43 @@ def explainable(query: str) -> str:
     return re.sub(r"\binterval\s+(\$\d+)", r"\1::interval", query, flags=re.IGNORECASE)
 
 
-def read_plan(root: dict, reltuples: dict[str, int]) -> tuple[str, list[Scan]]:
-    """Plan JSON -> ("Limit > Sort > Seq Scan on orders", scans worth an index)."""
-    summary, scans, seq_scans = [], [], []
+def read_plan(root: dict, reltuples: dict[str, int], sql: str = "") -> tuple[str, list[Scan]]:
+    """Plan JSON -> ("Limit > Sort > Seq Scan on orders", scans worth an index).
 
-    def walk(node: dict, sort_keys: list[str], depth: int) -> None:
+    Two shapes are worth an index:
+    - a Seq Scan with a Filter: every row read, most thrown away;
+    - an Index Scan whose Filter has an equality the index does not cover: the
+      index only gives the order (or a loose range), and rows are thrown away after
+      it. INC-004: with (customer_id, created_at) dropped, the planner walked
+      ix_orders_created_at backwards and filtered on customer_id.
+    """
+    summary, found = [], []
+
+    def walk(node: dict, sort_keys: list[str], sorted_above: bool, depth: int) -> None:
         kind = node["Node Type"]
         if depth < 6:
             summary.append(f"{kind} on {node['Relation Name']}" if "Relation Name" in node else kind)
-        keys = node.get("Sort Key", sort_keys) if kind in ("Sort", "Incremental Sort") else sort_keys
+        is_sort = kind in ("Sort", "Incremental Sort")
+        keys = node.get("Sort Key", sort_keys) if is_sort else sort_keys
         if kind == "Seq Scan" and node.get("Filter"):
-            seq_scans.append((node, keys))
+            found.append(("full scan", node, keys, sorted_above or is_sort))
+        elif kind in ("Index Scan", "Index Only Scan") and parse_predicates(node.get("Filter", ""))[0]:
+            found.append((f"index scan on {node.get('Index Name', '?')} then filter", node, keys,
+                          sorted_above or is_sort))
         for child in node.get("Plans", []):
-            walk(child, keys, depth + 1)
+            walk(child, keys, sorted_above or is_sort, depth + 1)
 
-    walk(root, [], 0)
-    for node, keys in seq_scans:
+    walk(root, [], False, 0)
+    scans = []
+    for reason, node, keys, sorted_above in found:
         table, alias = node["Relation Name"], node.get("Alias", node["Relation Name"])
-        eq, rng = parse_predicates(node["Filter"])
-        # A sort key belongs to this scan if it names this alias, or names nothing and this is the only scan.
-        sort = [k for k in keys if k.split(".")[0] == alias or ("." not in k.split()[0] and len(seq_scans) == 1)]
-        scans.append(Scan(table, "full scan", eq, parse_sort_keys(", ".join(sort)), rng,
-                          table_rows=reltuples.get(table)))
+        eq, rng = parse_predicates(" AND ".join(filter(None, [node.get("Index Cond"), node.get("Filter")])))
+        sort = [k for k in keys if k.split(".")[0] == alias or ("." not in k.split()[0] and len(found) == 1)]
+        sort_keys = parse_sort_keys(", ".join(sort))
+        # No Sort node above an index scan: the index delivers the ORDER BY, so take it from the SQL.
+        if not sort_keys and not sorted_above and reason != "full scan" and len(found) == 1:
+            sort_keys = parse_order_by(sql)
+        scans.append(Scan(table, reason, eq, sort_keys, rng, table_rows=reltuples.get(table)))
     return " > ".join(summary), scans
 
 

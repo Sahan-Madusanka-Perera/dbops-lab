@@ -1,0 +1,57 @@
+### 2026-11-17T16:19:42Z inject
+16:19:43  drill start: Session altered. APP_DATA 79.1% used, 16 MB of 20 MB
+16:19:43  batch load: 2,000 orders per commit, as SHOP, until the tablespace is full
+12 batches committed (24000 rows), then:
+ORA-01653: unable to increase tablespace APP_DATA by 1MB during insert or update
+on table SHOP.ORDERS
+16:19:43  after the load: Session altered. APP_DATA 99.7% used, 20 MB of 20 MB
+16:19:43  an application insert now:
+
+### 16:19:43 dbops health --engine oracle
+DBOps health  2026-11-17 21:49:47
+
+oracle
+  OK      reachable                                 Oracle 23.26.3.0.0, FREEPDB1
+  OK      cpu                        1.4%
+  OK      memory                     16.7%          1.279GiB / 7.654GiB
+  OK      storage                    4.0%           /opt/oracle/oradata: 16.8 GB of 452.1 GB
+  OK      sessions                   28.0%          90 of 322
+  CRIT    tablespace APP_DATA        99.7%          20 MB of 20 MB
+  OK      tablespace SYSAUX          0.1%           353 MB of 422628 MB
+  OK      tablespace SYSTEM          0.1%           289 MB of 422550 MB
+  OK      tablespace USERS           0%             0 MB of 32768 MB
+  OK      tablespace UNDOTBS1        0%             11 MB of 33554432 MB
+  OK      tablespace TEMP            0%             0 MB of 32768 MB
+  OK      long-running (>60s)        0
+  OK      blocked sessions           0
+  OK      last verified backup       1.1h           20261117T151252Z, 465 MB, recoverable to SCN 4126090
+
+CRIT    13 OK, 0 WARN, 1 CRIT, 0 UNKNOWN
+exit=2
+### 16:20:08 dbops workload --engine oracle --seconds 15 (tablespace full)
+Workload: 15 s per engine, all engines at once, seed fixed
+
+  engine    query                  calls   p50 ms   p95 ms  calls/s
+  oracle    orders_for_customer    17003     0.44     0.73   1133.5
+  oracle    customer_by_email       7050     0.23     0.37    470.0
+  oracle    pending_totals          2796     1.29     2.10    186.4
+  oracle    recent_orders           1380     0.47     0.76     92.0
+exit=0
+
+### 16:20:30 fix
+16:20:30  before: APP_DATA 99.7% used, 20 MB of 20 MB
+datafile resized to 64M, autoextend on next 16M up to 1G
+16:20:30  after: APP_DATA 1.9% used, 20 MB of 1024 MB
+
+### 16:20:30 the 500-row batch that failed, again
+500 rows created.
+Rollback complete.
+
+### 16:20:30 dbops health --engine oracle
+  OK      tablespace APP_DATA        2%             21 MB of 1024 MB
+OK      14 OK, 0 WARN, 0 CRIT, 0 UNKNOWN
+
+### 16:20:40 cleanup
+16:20:40  removing the drill's rows and returning APP_DATA to 20 MB, AUTOEXTEND OFF
+cleaned up
+16:20:41  now: APP_DATA 74.1% used, 15 MB of 20 MB
