@@ -1,0 +1,14 @@
+[mariadb]
+server_id              = 1
+
+# Binary log + GTID: required for the replica, and for point-in-time recovery (M3)
+log_bin                = mariadb-bin
+binlog_format          = ROW
+gtid_strict_mode       = ON
+log_slave_updates      = ON
+binlog_expire_logs_seconds = 259200   # 3 days
+
+# Slow query log, read by M4
+slow_query_log         = ON
+slow_query_log_file    = /var/lib/mysql/slow.log
+long_query_time        = 0.5

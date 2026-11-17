@@ -8,6 +8,19 @@ that break the databases on purpose so the fixes can be practised and written up
 The application databases stay small on purpose. This project is about running
 the databases, not the apps that use them.
 
+## Quick start
+
+Needs Docker Desktop with at least 6 GB of memory.
+
+```bash
+cp .env.example .env    # change the passwords
+make up                 # Oracle, MariaDB x2, MongoDB x3, PostgreSQL
+make replication        # seed the MariaDB replica, start GTID replication
+make                    # list every command
+```
+
+Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
 ## Milestones
 
 | | Milestone | Branch | What it proves |
