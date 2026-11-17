@@ -16,3 +16,6 @@ ansible/inventory.ini
 
 .DS_Store
 *.egg-info/
+
+# dbops local state (slow --reset markers)
+.dbops/

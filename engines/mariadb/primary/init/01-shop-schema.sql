@@ -9,7 +9,8 @@ CREATE TABLE customers (
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE = InnoDB;
 
--- No index on customer_id or status: M4 has to find that.
+-- No index on status or created_at: M4 has to find that. InnoDB creates one on
+-- customer_id for the foreign key, so that lookup is already indexed here.
 CREATE TABLE orders (
   id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   customer_id INT UNSIGNED NOT NULL,

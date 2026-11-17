@@ -6,7 +6,7 @@ export
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs replication monitor-users archivelog backup backups install health test test-live oracle mariadb mariadb-replica mongo psql reset
+.PHONY: help up down ps logs replication monitor-users archivelog backup backups install health workload slow test test-live oracle mariadb mariadb-replica mongo psql reset
 
 help: ## List the commands
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -52,6 +52,12 @@ install: ## Create .venv and install the dbops CLI with its test tools
 
 health: ## Health of every instance (exit 0 OK, 1 WARN, 2 CRIT, 3 UNKNOWN)
 	.venv/bin/dbops health
+
+workload: ## Run the application query mix for 30 s and report latency; make workload s=60
+	.venv/bin/dbops workload --seconds $(or $(s),30)
+
+slow: ## Slowest statements per engine with index suggestions; make slow a=--ddl, a=--reset
+	.venv/bin/dbops slow $(a)
 
 test: ## Unit tests, no databases needed
 	.venv/bin/pytest -q

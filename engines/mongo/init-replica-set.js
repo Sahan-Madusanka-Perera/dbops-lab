@@ -55,4 +55,13 @@ if (shop.orders.estimatedDocumentCount() === 0) {
   print('seeded shop: 5000 customers, 50000 orders');
 }
 
+// Profiler, read by `dbops slow` (M4). Per member and not persisted, so it is set
+// on every run. Same rule as MariaDB's slow log: slow, or reads 1,000+ documents.
+for (const m of members) {
+  new Mongo(m.host).getDB('shop').setProfilingLevel(1, {
+    filter: { $or: [{ millis: { $gte: 500 } }, { docsExamined: { $gte: 1000 } }] },
+  });
+}
+print('profiler on for shop: millis >= 500 or docsExamined >= 1000');
+
 print(rs.status().members.map((m) => `${m.name} ${m.stateStr}`).join('\n'));

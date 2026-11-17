@@ -1,0 +1,19 @@
+Workload: 30 s per engine, all engines at once, seed fixed
+
+  engine    query                  calls   p50 ms   p95 ms  calls/s
+  oracle    orders_for_customer    19728     0.70     1.81    657.6
+  oracle    customer_by_email       8193     0.35     1.04    273.1
+  oracle    pending_totals          3292     1.91     3.69    109.7
+  oracle    recent_orders           1601     0.75     1.85     53.4
+  mariadb   orders_for_customer    17164     0.46     1.28    572.1
+  mariadb   customer_by_email       7112     0.38     1.21    237.1
+  mariadb   pending_totals          2818     5.22     6.91     93.9
+  mariadb   recent_orders           1393     0.53     1.37     46.4
+  mongo     orders_for_customer    27401     0.33     0.75    913.4
+  mongo     customer_by_email      11421     0.29     0.63    380.7
+  mongo     pending_totals          4574     3.04     4.04    152.5
+  mongo     recent_orders           2269     0.41     0.86     75.6
+  postgres  orders_for_customer    27730     0.36     1.08    924.3
+  postgres  customer_by_email      11563     0.34     1.07    385.4
+  postgres  pending_totals          4635     2.06     3.26    154.5
+  postgres  recent_orders           2295     0.37     1.13     76.5

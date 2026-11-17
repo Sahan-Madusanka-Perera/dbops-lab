@@ -1,0 +1,88 @@
+DBOps slow queries   top 4 per engine, ranked by total time
+
+oracle   V$SQL for SHOP since the cursors were loaded
+  #1  12,225 calls   total 5,573 ms   mean 0.46 ms   285 buffer gets for 10 rows
+      SELECT id, status, total_cents, created_at FROM orders WHERE customer_id = :1 ORDER BY created_at DESC FETC...
+      plan  COUNT STOPKEY > VIEW > SORT ORDER BY STOPKEY > TABLE ACCESS FULL ORDERS
+      why   full scan of orders, filtering on customer_id, sorting by created_at
+      why   orders has no optimizer statistics
+      fix   EXEC DBMS_STATS.GATHER_TABLE_STATS('SHOP', 'ORDERS');
+      fix   CREATE INDEX shop.ix_orders_customer_id_created_at ON shop.orders (customer_id, created_at);
+  #2  1,001 calls   total 4,871 ms   mean 4.87 ms   285 buffer gets for 50 rows
+      SELECT id, customer_id, total_cents FROM orders WHERE created_at >= SYSTIMESTAMP - INTERVAL '1' DAY ORDER B...
+      plan  COUNT STOPKEY > VIEW > SORT ORDER BY STOPKEY > TABLE ACCESS FULL ORDERS
+      why   full scan of orders, range on created_at, sorting by created_at
+      why   orders has no optimizer statistics
+      fix   EXEC DBMS_STATS.GATHER_TABLE_STATS('SHOP', 'ORDERS');
+      fix   CREATE INDEX shop.ix_orders_created_at ON shop.orders (created_at);
+  #3  1,994 calls   total 2,348 ms   mean 1.18 ms   323 buffer gets for 2 rows
+      SELECT c.country, COUNT(*), SUM(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  HASH GROUP BY > HASH JOIN > NESTED LOOPS > NESTED LOOPS > TABLE ACCESS FULL ORDERS > INDEX UNIQUE SCAN SYS_C008716
+      why   full scan of orders, filtering on status
+      why   orders has no optimizer statistics
+      why   full scan of customers
+      why   customers has no optimizer statistics
+      fix   EXEC DBMS_STATS.GATHER_TABLE_STATS('SHOP', 'ORDERS');
+      fix   EXEC DBMS_STATS.GATHER_TABLE_STATS('SHOP', 'CUSTOMERS');
+      fix   CREATE INDEX shop.ix_orders_status ON shop.orders (status);
+  #4  5,056 calls   total 125 ms   mean 0.02 ms   3 buffer gets for 1 rows
+      SELECT id, country FROM customers WHERE email = :1
+      plan  TABLE ACCESS BY INDEX ROWID CUSTOMERS > INDEX UNIQUE SCAN SYS_C008717
+
+mariadb   slow log on dbops-mariadb-primary (full scans of 1,000+ rows, or over 0.5 s)
+  #1  2,048 calls   total 13,404 ms   mean 6.55 ms   55,005 rows read for 2 returned
+      SELECT c.country, COUNT(*), SUM(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  filesort > ALL on orders > eq_ref on customers
+      why   full scan of orders, filtering on status
+      why   optimizer estimates 1 rows in orders but 55,005 are read: statistics are stale
+      fix   ANALYZE TABLE orders;
+      fix   CREATE INDEX ix_orders_status ON orders (status);
+  #2  1,015 calls   total 3,214 ms   mean 3.17 ms   50,051 rows read for 50 returned
+      SELECT id, customer_id, total_cents FROM orders WHERE created_at >= NOW() - INTERVAL ? DAY ORDER BY created...
+      plan  filesort > ALL on orders
+      why   full scan of orders, range on created_at, sorting by created_at
+      why   optimizer estimates 1 rows in orders but 50,051 are read: statistics are stale
+      fix   ANALYZE TABLE orders;
+      fix   CREATE INDEX ix_orders_created_at ON orders (created_at);
+
+mongo   system.profile on mongo1-3 since the last reset (1,000+ documents read, or over 500 ms)
+  #1  551 calls   total 7,134 ms   mean 12.95 ms   50,000 docs read for 10 returned
+      query orders {customerId: ?} sort {createdAt: -1} limit 20
+      plan  COLLSCAN
+      why   full scan of orders, filtering on customerId, sorting by createdAt
+      fix   db.orders.createIndex({ customerId: 1, createdAt: -1 })
+  #2  93 calls   total 988 ms   mean 10.62 ms   50,000 docs read for 1 returned
+      aggregate orders {status: ?} > $group
+      plan  COLLSCAN
+      why   full scan of orders, filtering on status
+      fix   db.orders.createIndex({ status: 1 })
+  #3  42 calls   total 581 ms   mean 13.83 ms   50,000 docs read for 50 returned
+      query orders {createdAt: <range>} sort {createdAt: -1} limit 50
+      plan  COLLSCAN
+      why   full scan of orders, range on createdAt, sorting by createdAt
+      fix   db.orders.createIndex({ createdAt: -1 })
+  #4  16 calls   total 209 ms   mean 13.06 ms   50,000 docs read for 1 returned
+      query orders {customerId: ?} sort {createdAt: -1} limit 20
+      plan  COLLSCAN
+      why   full scan of orders, filtering on customerId, sorting by createdAt
+      fix   db.orders.createIndex({ customerId: 1, createdAt: -1 })
+
+postgres   pg_stat_statements since its last reset
+  #1  10,580 calls   total 11,984 ms   mean 1.13 ms   368 blocks/call
+      SELECT id, status, total_cents, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMI...
+      plan  Limit > Sort > Seq Scan on orders
+      why   full scan of orders (50,000 rows), filtering on customer_id, sorting by created_at
+      fix   CREATE INDEX ix_orders_customer_id_created_at ON orders (customer_id, created_at);
+  #2  1,726 calls   total 4,037 ms   mean 2.34 ms   410 blocks/call
+      SELECT c.country, count(*), sum(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  Aggregate > Hash Join > Seq Scan on orders > Hash > Seq Scan on customers
+      why   full scan of orders (50,000 rows), filtering on status
+      fix   CREATE INDEX ix_orders_status ON orders (status);
+  #3  886 calls   total 3,396 ms   mean 3.83 ms   368 blocks/call
+      SELECT id, customer_id, total_cents FROM orders WHERE created_at >= now() - interval $1 ORDER BY created_at...
+      plan  Limit > Sort > Seq Scan on orders
+      why   full scan of orders (50,000 rows), range on created_at, sorting by created_at
+      fix   CREATE INDEX ix_orders_created_at ON orders (created_at);
+  #4  4,383 calls   total 52 ms   mean 0.01 ms   3 blocks/call
+      SELECT id, country FROM customers WHERE email = $1
+      plan  Index Scan on customers

@@ -1,0 +1,38 @@
+DBOps slow queries   top 4 per engine, ranked by total time
+
+oracle   V$SQL for SHOP since the cursors were loaded
+  #1  3,292 calls   total 4,505 ms   mean 1.37 ms   302 buffer gets for 2 rows
+      SELECT c.country, COUNT(*), SUM(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  HASH GROUP BY > HASH JOIN > TABLE ACCESS FULL CUSTOMERS > TABLE ACCESS BY INDEX ROWID BATCHED ORDERS > INDEX RANGE SCAN IX_ORDERS_STATUS
+      why   full scan of customers (5,000 rows)
+  #2  19,728 calls   total 898 ms   mean 0.05 ms   13 buffer gets for 10 rows
+      SELECT id, status, total_cents, created_at FROM orders WHERE customer_id = :1 ORDER BY created_at DESC FETC...
+      plan  COUNT STOPKEY > VIEW > TABLE ACCESS BY INDEX ROWID ORDERS > INDEX RANGE SCAN DESCENDING IX_ORDERS_CUSTOMER_ID_CREATED_AT
+  #3  8,193 calls   total 216 ms   mean 0.03 ms   3 buffer gets for 1 rows
+      SELECT id, country FROM customers WHERE email = :1
+      plan  TABLE ACCESS BY INDEX ROWID CUSTOMERS > INDEX UNIQUE SCAN SYS_C008717
+  #4  1,601 calls   total 116 ms   mean 0.07 ms   53 buffer gets for 50 rows
+      SELECT id, customer_id, total_cents FROM orders WHERE created_at >= SYSTIMESTAMP - INTERVAL '1' DAY ORDER B...
+      plan  COUNT STOPKEY > VIEW > TABLE ACCESS BY INDEX ROWID ORDERS > INDEX FULL SCAN DESCENDING IX_ORDERS_CREATED_AT
+
+mariadb   slow log on dbops-mariadb-primary (full scans of 1,000+ rows, or over 0.5 s)
+  nothing over the thresholds since the last reset (nothing ran? try  dbops workload)
+
+mongo   system.profile on mongo1-3 since the last reset (1,000+ documents read, or over 500 ms)
+  #1  925 calls   total 1,951 ms   mean 2.11 ms   5,000 docs read for 1 returned
+      aggregate orders {status: ?} > $group
+      plan  IXSCAN { status: 1 }
+
+postgres   pg_stat_statements since its last reset
+  #1  4,635 calls   total 7,424 ms   mean 1.60 ms   416 blocks/call
+      SELECT c.country, count(*), sum(o.total_cents) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE...
+      plan  Aggregate > Hash Join > Bitmap Heap Scan on orders > Bitmap Index Scan > Hash > Seq Scan on customers
+  #2  27,730 calls   total 685 ms   mean 0.02 ms   12 blocks/call
+      SELECT id, status, total_cents, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMI...
+      plan  Limit > Index Scan on orders
+  #3  11,563 calls   total 132 ms   mean 0.01 ms   3 blocks/call
+      SELECT id, country FROM customers WHERE email = $1
+      plan  Index Scan on customers
+  #4  2,295 calls   total 55 ms   mean 0.02 ms   52 blocks/call
+      SELECT id, customer_id, total_cents FROM orders WHERE created_at >= now() - interval $1 ORDER BY created_at...
+      plan  Limit > Index Scan on orders

@@ -5,6 +5,8 @@
     dbops health --json                one JSON document, for monitoring
     dbops health --watch 30            re-run every 30 seconds
     dbops backups                      every backup on disk and its restore test result
+    dbops workload --seconds 30        run the sample application queries against every engine
+    dbops slow                         worst statements per engine, their plans, index suggestions
 
 Exit codes follow the Nagios plugin convention:
     0 OK   1 WARN   2 CRIT   3 UNKNOWN (including a usage error)
@@ -21,6 +23,8 @@ from .config import ENGINES
 from .health import collect
 from .model import Status, worst
 from .render import as_json, as_text
+from . import workload
+from .slow import report as slow_report
 
 
 class _Parser(argparse.ArgumentParser):
@@ -44,6 +48,18 @@ def _parser() -> argparse.ArgumentParser:
     health.add_argument("--no-colour", action="store_true", help="plain text even on a terminal")
 
     sub.add_parser("backups", help="list backups and their restore test results (make backup takes them)")
+
+    wl = sub.add_parser("workload", help="run a fixed mix of application queries, report latency per query")
+    wl.add_argument("--engine", action="append", choices=ENGINES, help="limit to one engine (repeatable)")
+    wl.add_argument("--seconds", type=float, default=30, help="how long to run (default 30)")
+
+    slow = sub.add_parser("slow", help="rank statements by total time, read their plans, suggest indexes")
+    slow.add_argument("--engine", action="append", choices=ENGINES, help="limit to one engine (repeatable)")
+    slow.add_argument("--top", type=int, default=3, help="statements per engine (default 3)")
+    out = slow.add_mutually_exclusive_group()
+    out.add_argument("--json", action="store_true", help="print JSON")
+    out.add_argument("--ddl", action="store_true", help="print only the suggested fixes, as a script to review")
+    out.add_argument("--reset", action="store_true", help="clear the collected statistics, to measure from now")
     return parser
 
 
@@ -52,6 +68,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "backups":
         print(as_table(list_backups()))
         return 0
+    if args.command == "slow":
+        if args.reset:
+            print("\n".join(slow_report.reset(args.engine)))
+            return 0
+        results = slow_report.collect(args.engine, args.top)
+        print(slow_report.as_json(results) if args.json else
+              slow_report.as_ddl(results) if args.ddl else slow_report.as_text(results, args.top))
+        return 1 if any(src.startswith("error") for _, _, src in results) else 0
+    if args.command == "workload":
+        results = workload.run(args.engine, args.seconds)
+        print(workload.as_text(results, args.seconds))
+        return 1 if any(r.error for r in results) else 0
     if args.watch is not None and args.watch < 1:
         _parser().error("--watch needs at least 1 second")
 

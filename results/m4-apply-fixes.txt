@@ -1,0 +1,47 @@
+== oracle
+
+Session altered.
+
+
+PL/SQL procedure successfully completed.
+
+
+PL/SQL procedure successfully completed.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+== mariadb (primary; replicates to the replica)
++-------------+---------+----------+----------+
+| Table       | Op      | Msg_type | Msg_text |
++-------------+---------+----------+----------+
+| shop.orders | analyze | status   | OK       |
++-------------+---------+----------+----------+
+== mongo (via the replica set, so it lands on the primary)
+[
+  'customerId_1_createdAt_-1',
+  'status_1',
+  'createdAt_-1'
+]
+== postgres
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+== mariadb follow-up: stale statistics on customers (table_rows 77, actual 5,000)
++----------------+---------+----------+----------+
+| Table          | Op      | Msg_type | Msg_text |
++----------------+---------+----------+----------+
+| shop.customers | analyze | status   | OK       |
++----------------+---------+----------+----------+
++------------+------------+
+| table_name | table_rows |
++------------+------------+
+| customers  |       5000 |
+| orders     |      50416 |
++------------+------------+
