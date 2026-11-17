@@ -1,0 +1,21 @@
+==> oracle
+dbops_monitor ready
+shop_app ready: DML on schema SHOP
+PDBADMIN locked
+failed logins audited
+==> mariadb-replica
+dbops_monitor, shop_app ready on the replica
+==> mariadb-primary
+dbops_monitor, shop_app ready on the primary
+==> postgres
+dbops_monitor ready
+shop_app ready: DML on public
+==> mongo
+dbops_admin created (localhost exception)
+dbops_admin ready: root@admin
+shop_app ready: shopApp@shop
+dbops_monitor ready: clusterMonitor@admin, profileReader@shop
+profiler on for shop: millis >= 500 or docsExamined >= 1000
+mongo1:27017 PRIMARY
+mongo2:27017 SECONDARY
+mongo3:27017 SECONDARY

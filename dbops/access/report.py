@@ -1,0 +1,152 @@
+"""Collect every engine, apply the policy, and print the result for a terminal, a machine or an auditor."""
+
+from __future__ import annotations
+
+import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from importlib import import_module
+
+from ..config import ENGINES, load_env
+from ..model import Status
+from . import POLICY_FILE, Finding, Instance, Policy, evaluate, load_policy, verdict  # noqa: F401
+
+_ORDER = {Status.CRIT: 0, Status.WARN: 1, Status.UNKNOWN: 2, Status.OK: 3}
+
+
+def collect(engines: list[str] | None) -> list[Instance]:
+    env, chosen = load_env(), engines or list(ENGINES)
+
+    def one(engine):
+        try:
+            return import_module(f".{engine}", __package__).collect(env)
+        except Exception as e:  # noqa: BLE001 - one engine failing does not stop the review
+            return [Instance(engine, engine, error=str(e).strip().splitlines()[0][:160] if str(e).strip()
+                             else type(e).__name__)]
+
+    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+        return [inst for result in pool.map(one, chosen) for inst in result]
+
+
+def review(engines: list[str] | None, policy: Policy | None = None):
+    instances = collect(engines)
+    findings = evaluate(instances, policy or load_policy())
+    findings.sort(key=lambda f: (bool(f.accepted), _ORDER[f.status], f.engine, f.instance, f.account))
+    return instances, findings
+
+
+def _when(dt: datetime | None, now: datetime) -> str:
+    if dt is None:
+        return "-"
+    days = (now - dt).days
+    return dt.strftime("%Y-%m-%d") + (f" ({days}d)" if days > 0 else "")
+
+
+def _counts(findings: list[Finding]) -> str:
+    open_ = [f for f in findings if not f.accepted]
+    parts = [f"{s.name} {sum(f.status == s for f in open_)}" for s in (Status.CRIT, Status.WARN, Status.UNKNOWN)
+             if any(f.status == s for f in open_)]
+    accepted = sum(bool(f.accepted) for f in findings)
+    return " · ".join(parts + ([f"accepted {accepted}"] if accepted else [])) or "no findings"
+
+
+def _type(acct, policy: Policy) -> str:
+    approved = policy.approved(acct)
+    return approved.type if approved else ("built-in" if acct.builtin else "UNAPPROVED")
+
+
+def as_text(instances: list[Instance], findings: list[Finding], policy: Policy) -> str:
+    now = datetime.now(timezone.utc)
+    accounts = [a for i in instances for a in i.accounts]
+    lines = [f"DBOps access review   {now:%Y-%m-%d %H:%M} UTC   policy: {POLICY_FILE.relative_to(POLICY_FILE.parents[1])}",
+             f"{verdict(findings).name}   {_counts(findings)}   "
+             f"{sum(a.active for a in accounts)} accounts can log in, on {len(instances)} instances", ""]
+    lines.append("Findings")
+    if not findings:
+        lines.append("  none")
+    for f in findings:
+        label = "ACCEPTED" if f.accepted else f.status.name
+        lines.append(f"  {label:8}  {f.engine + '/' + f.instance:24} {f.account:22} {f.rule:19} {f.detail}")
+        if f.accepted:
+            lines.append(f"  {'':8}  {'':24} {'':22} {'':19} accepted: {f.accepted}")
+        elif f.fix:
+            lines.append(f"  {'':8}  {'':24} {'':22} {'':19} fix: {f.fix}")
+    lines += ["", "Accounts that can log in",
+              f"  {'instance':24} {'account':22} {'type':10} {'admin':5} {'ddl':4} {'password set':18} {'last login':18}"]
+    for inst in instances:
+        for a in inst.accounts:
+            if a.active:
+                lines.append(f"  {a.engine + '/' + a.instance:24} {a.name:22} {_type(a, policy):10} "
+                             f"{'yes' if a.admin else '':5} {'yes' if a.ddl else '':4} "
+                             f"{_when(a.password_changed, now):18} {_when(a.last_login, now):18}")
+    lines += ["", "Login records"]
+    for inst in instances:
+        if inst.error or not inst.auth_enabled:
+            continue
+        since = f"since {inst.audit_since:%Y-%m-%d %H:%M}" if inst.audit_since else "since each account was created"
+        lines.append(f"  {inst.engine + '/' + inst.name:24} "
+                     + (f"{inst.login_source}, {since}" if inst.login_source else "none: last login unknown"))
+    return "\n".join(lines)
+
+
+def as_json(instances: list[Instance], findings: list[Finding]) -> str:
+    return json.dumps({
+        "verdict": verdict(findings).name,
+        "findings": [f.to_dict() for f in findings],
+        "instances": [{"engine": i.engine, "instance": i.name, "auth_enabled": i.auth_enabled,
+                       "login_source": i.login_source, "audit_since": i.audit_since, "error": i.error,
+                       "accounts": [a.__dict__ for a in i.accounts]} for i in instances],
+    }, indent=2, default=str)
+
+
+def as_markdown(instances: list[Instance], findings: list[Finding], policy: Policy) -> str:
+    """An evidence report: what was reviewed, how, what was found, and room for sign-off."""
+    now = datetime.now(timezone.utc)
+    md = [f"# Database access review, {now:%Y-%m-%d}", "",
+          f"Generated by `dbops access --markdown` at {now:%Y-%m-%d %H:%M} UTC. "
+          f"Approved accounts and accepted risks: `policy/access-policy.toml`.", "",
+          f"**Result: {verdict(findings).name}** ({_counts(findings)})", "",
+          "## Scope and method", "",
+          "| Engine | Instance | Accounts from | Last login from |", "|---|---|---|---|"]
+    source = {"oracle": "DBA_USERS, DBA_ROLE_PRIVS (recursive), DBA_SYS_PRIVS, DBA_SCHEMA_PRIVS",
+              "mariadb": "mysql.global_priv, information_schema user/schema privileges, roles_mapping",
+              "mongo": "usersInfo with inherited privileges",
+              "postgres": "pg_authid, pg_auth_members, pg_hba_file_rules, table grants"}
+    for i in instances:
+        login = ("not reviewed: " + i.error if i.error else
+                 "n/a: access control off" if not i.auth_enabled else
+                 i.login_source + (f" since {i.audit_since:%Y-%m-%d %H:%M}" if i.audit_since else "") or "not recorded")
+        md.append(f"| {i.engine} | {i.name} | {source.get(i.engine, '')} | {login} |")
+
+    md += ["", "## Findings", ""]
+    open_ = [f for f in findings if not f.accepted]
+    if open_:
+        md += ["| Status | Instance | Account | Rule | Finding | Fix |", "|---|---|---|---|---|---|"]
+        md += [f"| {f.status.name} | {f.engine}/{f.instance} | `{f.account}` | {f.rule} | {f.detail} | {f.fix} |"
+               for f in open_]
+    else:
+        md.append("No open findings.")
+    accepted = [f for f in findings if f.accepted]
+    if accepted:
+        md += ["", "### Accepted risks", "", "| Instance | Account | Rule | Finding | Accepted because |",
+               "|---|---|---|---|---|"]
+        md += [f"| {f.engine}/{f.instance} | `{f.account}` | {f.rule} | {f.detail} | {f.accepted} |" for f in accepted]
+
+    md += ["", "## Account inventory", "",
+           "Every account that can log in. Locked accounts and those that cannot log in are listed in the JSON output.", "",
+           "| Instance | Account | Type | Owner | Admin | DDL | Roles | Password set | Last login |",
+           "|---|---|---|---|---|---|---|---|---|"]
+    for i in instances:
+        for a in i.accounts:
+            if not a.active:
+                continue
+            approved = policy.approved(a)
+            roles = ", ".join(a.roles[:4]) + (f" +{len(a.roles) - 4}" if len(a.roles) > 4 else "")
+            md.append(f"| {a.engine}/{a.instance} | `{a.name}` | {_type(a, policy)} | "
+                      f"{approved.owner if approved else ''} | {'yes' if a.admin else ''} | {'yes' if a.ddl else ''} | "
+                      f"{roles} | {_when(a.password_changed, now)} | {_when(a.last_login, now)} |")
+
+    md += ["", "## Sign-off", "",
+           "| Role | Name | Date | Decision |", "|---|---|---|---|",
+           "| Reviewer (DBA) | | | |", "| Data owner | | | |", ""]
+    return "\n".join(md)

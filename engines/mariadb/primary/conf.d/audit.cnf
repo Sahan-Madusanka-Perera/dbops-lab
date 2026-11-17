@@ -1,0 +1,10 @@
+# Login auditing for dbops access (M5): every connect and failed connect, by user.
+# FORCE_PLUS_PERMANENT: the plugin must load, and UNINSTALL PLUGIN cannot switch it off.
+[mariadb]
+plugin_load_add               = server_audit
+server_audit                  = FORCE_PLUS_PERMANENT
+server_audit_logging          = ON
+server_audit_events           = CONNECT
+server_audit_file_path        = /var/lib/mysql/server_audit.log
+server_audit_file_rotate_size = 10485760
+server_audit_file_rotations   = 9

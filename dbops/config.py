@@ -58,7 +58,7 @@ def targets(env: dict[str, str] | None = None) -> list[Target]:
                host, port("MARIADB_REPLICA_PORT", 3317), MONITOR_USER, pw, role="replica"),
         *(
             Target(f"mongo{i}", "mongo", f"dbops-mongo{i}", "/data/db",
-                   host, port(f"MONGO{i}_PORT", 27016 + i), "", "", role="member")
+                   host, port(f"MONGO{i}_PORT", 27016 + i), MONITOR_USER, pw, database="admin", role="member")
             for i in (1, 2, 3)
         ),
         Target("postgres", "postgres", "dbops-postgres", "/var/lib/postgresql/data",

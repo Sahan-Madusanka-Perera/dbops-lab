@@ -11,6 +11,8 @@
 #            check they agree) with the source.
 #
 # mongorestore refuses --oplogReplay with --nsExclude, so the whole dump is restored.
+# The source needs a login (M5): dbops_admin's password goes to mongodump in a
+# config file, not on the command line, where any process listing would show it.
 #
 # shellcheck source=scripts/backup/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -19,11 +21,20 @@ SOURCE=dbops-mongo2
 SCRATCH=dbops-verify-mongo
 DB=shop
 
+AUTH=(-u dbops_admin --authenticationDatabase admin)
+# mongosh: log in from inside the script, the password read from the environment.
+# The scratch server runs without access control, so a failed login there is ignored.
+LOGIN='try { db.getSiblingDB("admin").auth("dbops_admin", process.env.MONGO_ADMIN_PASSWORD); } catch (e) {}'
+
 require_free_gb 2 "a mongodump and a scratch restore"
 start_backup mongo
-docker exec "$SOURCE" mongodump --quiet --oplog --gzip --archive="/backups/$BACKUP_ID/dump.archive.gz"
-OPTIME=$(docker exec "$SOURCE" mongosh --quiet --eval \
-  'const t = rs.status().members.find(m => m.self).optime.ts; `${t.getHighBits()}:${t.getLowBits()}`')
+docker exec -i "$SOURCE" sh -c 'umask 077; cat > /tmp/dbops-dump.yaml' <<<"password: '${MONGO_ADMIN_PASSWORD:?}'"
+trap 'docker exec "$SOURCE" rm -f /tmp/dbops-dump.yaml; cleanup_scratch' EXIT
+docker exec "$SOURCE" mongodump --quiet "${AUTH[@]}" --config /tmp/dbops-dump.yaml \
+  --oplog --gzip --archive="/backups/$BACKUP_ID/dump.archive.gz"
+docker exec "$SOURCE" rm -f /tmp/dbops-dump.yaml
+OPTIME=$(docker exec -e MONGO_ADMIN_PASSWORD "$SOURCE" mongosh --quiet --eval "$LOGIN"'
+  const t = rs.status().members.find(m => m.self).optime.ts; `${t.getHighBits()}:${t.getLowBits()}`')
 finish_backup "$SOURCE" "mongodump --oplog --gzip (secondary)" "oplog ts $OPTIME on mongo2 after the dump"
 
 log "restore into $SCRATCH"
@@ -36,7 +47,7 @@ fi
 
 # count + dbHash per collection, as "name<TAB>count docs, dbHash xxxx" lines
 summary() {
-  docker exec "$1" mongosh --quiet "$DB" --eval '
+  docker exec -e MONGO_ADMIN_PASSWORD "$1" mongosh --quiet "$DB" --eval "$LOGIN"'
     const hashes = db.runCommand({ dbHash: 1 }).collections;
     Object.keys(hashes).sort().forEach(c =>
       print(`${c}\t${db.getCollection(c).countDocuments()} docs, dbHash ${hashes[c].slice(0, 12)}`));'
