@@ -6,7 +6,7 @@ export
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down ps logs replication accounts archivelog backup backups install health workload slow access test test-live oracle mariadb mariadb-replica mongo psql reset vm-up vm-provision vm-check vm-verify vm-ssh vm-down
+.PHONY: help up down ps logs replication accounts archivelog backup backups install health workload slow access test test-live oracle mariadb mariadb-replica mongo psql reset vm-up vm-provision vm-check vm-verify vm-ssh vm-down drill drill-cleanup
 
 help: ## List the commands
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -86,6 +86,15 @@ mongo: ## mongosh on the rs0 primary, shop database, as dbops_admin
 
 psql: ## psql into shop
 	docker exec -it dbops-postgres psql -U postgres -d shop
+
+DRILLS := $(patsubst drills/%.sh,%,$(filter-out drills/lib.sh,$(wildcard drills/*.sh)))
+drill: ## Break something on purpose (M7): make drill d=mongo-primary-lost, a=fix to remediate
+	@[[ -n "$(d)" && -x drills/$(d).sh ]] || { echo "pick one: make drill d=<name>, from: $(DRILLS)"; exit 2; }
+	drills/$(d).sh $(or $(a),inject)
+
+drill-cleanup: ## Put the lab back after a drill: make drill-cleanup d=<name>
+	@[[ -n "$(d)" && -x drills/$(d).sh ]] || { echo "pick one: make drill-cleanup d=<name>, from: $(DRILLS)"; exit 2; }
+	drills/$(d).sh cleanup
 
 reset: ## Delete every volume and start again from empty (asks first)
 	@read -p "Delete all lab data? [y/N] " a && [[ $$a == y ]]

@@ -72,6 +72,10 @@ def _instance(target: Target) -> list[Check]:
         def replication():
             return replication_checks(target, one("SHOW REPLICA STATUS"))
 
+        def errant():
+            row = one("SELECT @@gtid_binlog_pos AS pos, @@server_id AS id")
+            return errant_gtid_check(target, row["pos"], int(row["id"]))
+
         def read_only():
             ro = int(one("SELECT @@read_only AS ro")["ro"])
             return Check(target.name, "read_only", Status.OK if ro else Status.CRIT, "ON" if ro else "OFF", "",
@@ -81,7 +85,7 @@ def _instance(target: Target) -> list[Check]:
         if target.role == "primary":
             plan.append(("replicas connected", replicas_connected))
         if target.role == "replica":
-            plan += [("replication", replication), ("read_only", read_only)]
+            plan += [("replication", replication), ("errant GTIDs", errant), ("read_only", read_only)]
 
         checks = []
         for name, fn in plan:
@@ -106,3 +110,22 @@ def replication_checks(target: Target, status: dict | None) -> list[Check]:
         Check(target.name, "replication", Status.OK, "IO=Yes SQL=Yes", "", f"GTID {status.get('Gtid_IO_Pos', '')}"),
         Check(target.name, "replication lag", grade(lag, *t.REPLICATION_LAG_S), lag, "s"),
     ]
+
+
+def errant_gtids(binlog_pos: str, server_id: int) -> list[str]:
+    """GTIDs a replica wrote itself: domain-server-seq entries carrying its own server_id.
+
+    A replica's binlog should only hold what it replicated. An entry under its own
+    server_id is a write made on the replica: its data has diverged, and in strict
+    GTID mode replication stops at the primary's next write in that domain (INC-003).
+    """
+    return [g for g in (binlog_pos or "").split(",")
+            if g.strip() and g.strip().split("-")[1] == str(server_id)]
+
+
+def errant_gtid_check(target: Target, binlog_pos: str, server_id: int) -> Check:
+    found = [g.strip() for g in errant_gtids(binlog_pos, server_id)]
+    if not found:
+        return Check(target.name, "errant GTIDs", Status.OK, 0)
+    return Check(target.name, "errant GTIDs", Status.CRIT, len(found), "",
+                 f"written on the replica, not replicated: {', '.join(found)}")

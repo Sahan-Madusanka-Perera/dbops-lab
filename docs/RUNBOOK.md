@@ -192,7 +192,88 @@ The wheel is built once per version, so without a bump the servers keep the old 
 Rotate a password: change it in `.env`, then `make vm-provision` (the accounts and
 `/etc/dbops/dbops.env` are rewritten from it).
 
-### 2.10 Start again from empty
+### 2.10 Run an incident drill (M7)
+
+Each drill breaks one thing the way it breaks in production, and puts it back:
+
+```bash
+make drill d=oracle-tablespace-full        # inject
+make drill d=oracle-tablespace-full a=fix  # the remediation from the postmortem
+make drill-cleanup d=oracle-tablespace-full
+```
+
+| Drill | Breaks | Postmortem |
+|---|---|---|
+| `oracle-tablespace-full` | APP_DATA (20 MB, AUTOEXTEND OFF) filled by a batch load: ORA-01653 | [INC-002](incidents/INC-002-oracle-tablespace-full.md) |
+| `mariadb-replication-broken` | a root write on the replica: errant GTID, SQL thread stops | [INC-003](incidents/INC-003-mariadb-replication-broken.md) |
+| `postgres-dropped-index` | `ix_orders_customer_id_created_at` dropped: 7.7x slower, no errors | [INC-004](incidents/INC-004-postgres-dropped-index.md) |
+| `mongo-primary-lost` | `docker kill dbops-mongo1`: election, write pause | [INC-005](incidents/INC-005-mongo-primary-lost.md) |
+
+Every step prints UTC timestamps. Keep the output: it is the postmortem's
+timeline. Write the postmortem from [incidents/TEMPLATE.md](incidents/TEMPLATE.md).
+Run `make health` before and after: a drill is finished when health matches what
+it was at the start.
+
+### 2.11 Respond to an incident
+
+First, `make health` (exit 2 = CRIT) and read the CRIT lines. Then find the
+symptom below.
+
+**Oracle: `ORA-01653` / `ORA-01654` (unable to extend), or `CRIT tablespace X`.**
+Expect small inserts to still work while batches fail. Find the datafile and
+whether it can grow:
+
+```sql
+SELECT file_name, bytes/1048576 mb, autoextensible, maxbytes/1048576 max_mb
+FROM dba_data_files WHERE tablespace_name = 'APP_DATA';
+```
+
+Give it room, with a ceiling the filesystem can hold (check `df` first):
+`ALTER DATABASE DATAFILE '...' AUTOEXTEND ON NEXT 16M MAXSIZE 1G;`, or `RESIZE`,
+or `ALTER TABLESPACE ... ADD DATAFILE`. Never use `MAXSIZE UNLIMITED`.
+[INC-002](incidents/INC-002-oracle-tablespace-full.md).
+
+**MariaDB: `CRIT replication IO=Yes SQL=No`, or `CRIT errant GTIDs`.** On the
+replica: `SHOW REPLICA STATUS\G` (Last_SQL_Errno, Last_SQL_Error) and
+`SELECT @@gtid_slave_pos, @@gtid_binlog_pos`. A GTID in `gtid_binlog_pos` with
+the replica's own server_id is a write made on the replica.
+
+- Find the stray rows.
+- Undo them with `SET SESSION sql_log_bin = 0` in the same session.
+- If replication stopped on error 1950: `STOP REPLICA; RESET MASTER; START
+  REPLICA` on the replica. First check that nothing reads the replica's binlogs.
+- Then `drills/mariadb-replication-broken.sh compare`.
+
+Do not skip events with `sql_slave_skip_counter`: that keeps the wrong data. If
+the stray writes cannot be found, rebuild the replica with `make replication`.
+[INC-003](incidents/INC-003-mariadb-replication-broken.md).
+
+**A query suddenly slower, no errors.** Health stays OK here.
+
+1. `make slow a="--engine postgres --reset"`, then let traffic run for a minute.
+2. `make slow`: the top statement, its plan, and the missing index.
+3. Check for a dropped or INVALID index:
+   `SELECT indexrelid::regclass, indisvalid FROM pg_index WHERE NOT indisvalid;`
+4. Rebuild with `CREATE INDEX CONCURRENTLY`, never a plain `CREATE INDEX` on a
+   live table. Then `ANALYZE` the table.
+
+[INC-004](incidents/INC-004-postgres-dropped-index.md).
+
+**MongoDB: `CRIT reachable` on a member, `CRIT rs0 member ...`.** Check
+`rs.status()` from a member that is up.
+
+- If a primary exists, writes work, and the urgent job is the lost redundancy:
+  one more loss stops all writes.
+- Bring the member back (`docker start`, or start `mongod`). It catches up from
+  the oplog by itself.
+- If it was gone longer than the oplog window, it needs an initial sync: empty
+  its data directory and start it.
+- If it is gone for good: `rs.reconfig()` it out of the set, then `rs.add()` a
+  replacement.
+
+[INC-005](incidents/INC-005-mongo-primary-lost.md).
+
+### 2.12 Start again from empty
 
 ```bash
 make reset    # deletes every volume; asks first

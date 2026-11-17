@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from dbops.config import Target
-from dbops.engines.mariadb import replication_checks
+from dbops.engines.mariadb import errant_gtid_check, errant_gtids, replication_checks
 from dbops.engines.mongo import replica_set_checks
 from dbops.model import Status
 
@@ -69,3 +69,18 @@ def test_down_member_and_no_primary_are_critical():
 
 def test_no_status_at_all_is_critical():
     assert replica_set_checks(None)[0].status is Status.CRIT
+
+
+def test_errant_gtids_are_the_replicas_own_writes():
+    # replica server_id 2; the primary is 1. Domain 0 replicated, 0-2-40 written locally.
+    assert errant_gtids("0-1-39", 2) == []
+    assert errant_gtids("0-2-40", 2) == ["0-2-40"]
+    assert errant_gtids("0-1-41,1-2-7", 2) == ["1-2-7"]          # one domain per comma
+    assert errant_gtids("", 2) == []                              # after RESET MASTER
+
+
+def test_errant_gtid_check_is_critical():
+    assert errant_gtid_check(REPLICA, "0-1-41", 2).status is Status.OK
+    c = errant_gtid_check(REPLICA, "0-2-40", 2)
+    assert (c.status, c.value) == (Status.CRIT, 1)
+    assert "0-2-40" in c.detail

@@ -227,6 +227,54 @@ now does); Docker's default `memory_swap` showed as drift in every plan (now set
 
 Operating procedures and troubleshooting are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
+## Incident drills (M7)
+
+Four failures, each caused on purpose by a script in `drills/`, detected with the
+tools from M2 to M5, fixed, and written up as a postmortem in `docs/incidents/`.
+Every drill has three steps: `inject`, `fix` (the remediation, as commands) and
+`cleanup` (back to the starting state, so it can run again).
+
+```bash
+make drill d=oracle-tablespace-full          # inject
+make drill d=oracle-tablespace-full a=fix
+make drill-cleanup d=oracle-tablespace-full
+```
+
+| Drill | What broke | Detected by | Fix | Postmortem |
+|---|---|---|---|---|
+| `oracle-tablespace-full` | A batch load filled APP_DATA (20 MB, AUTOEXTEND OFF): ORA-01653 after 24,000 rows. Single-row inserts still worked | `CRIT tablespace APP_DATA 99.7%` | Resize, then AUTOEXTEND with a MAXSIZE | [INC-002](docs/incidents/INC-002-oracle-tablespace-full.md) |
+| `mariadb-replication-broken` | A root insert on the replica (read_only does not stop root) logged errant GTID 0-2-40; strict mode stopped the SQL thread with error 1950 | `CRIT replication IO=Yes SQL=No` | Undo the row unlogged, `RESET MASTER` on the replica, `CHECKSUM TABLE` on both | [INC-003](docs/incidents/INC-003-mariadb-replication-broken.md) |
+| `postgres-dropped-index` | The (customer_id, created_at) index dropped: p50 0.15 to 1.16 ms, throughput 2,186 to 660/s, no errors | Workload latency and `dbops slow`. Health stayed OK | `CREATE INDEX CONCURRENTLY` under load | [INC-004](docs/incidents/INC-004-postgres-dropped-index.md) |
+| `mongo-primary-lost` | `docker kill` on the primary: 10.5 s without an acknowledged write, 0 failed writes | `CRIT reachable`, `CRIT rs0 member` | `docker start`; it catches up and takes the primary back with no write gap | [INC-005](docs/incidents/INC-005-mongo-primary-lost.md) |
+
+The raw output of each run is in `results/m7-drill-*.txt`.
+
+What the drills changed in dbops:
+
+- **`errant GTIDs`**, a new health check on every MariaDB replica. It goes CRIT
+  when the replica has logged a write of its own. That catches the stray write
+  at once, before replication breaks. Without strict mode it might never break
+  at all, and the data would silently diverge.
+- **`dbops slow` on PostgreSQL** now flags an Index Scan followed by a Filter on
+  an equality. With the composite index dropped, the planner walked the
+  `created_at` index backwards and filtered on customer_id. M4's rule only
+  looked at Seq Scans, so it ranked the query first but named no fix.
+
+Two predictions were wrong, and the postmortems say so:
+
+- I expected the replica to fail on a duplicate key (1062). GTID strict mode
+  stopped it first.
+- I expected mongo1's priority 2 to cause a second outage when it took the
+  primary back. A priority takeover waits for catch-up, and the writer saw no
+  gap.
+
+The open follow-ups are listed at the end of each postmortem:
+
+- a check on free space in absolute terms, and on growth rate, for tablespaces;
+- admin accounts without READ_ONLY ADMIN;
+- "expected indexes" and latency checks in `dbops health`;
+- a redundancy-left check for the replica set.
+
 ## Milestones
 
 | | Milestone | Branch | What it proves |
@@ -248,7 +296,7 @@ backups/     where backups land (git-ignored), one folder per engine
 dbops/       the Python CLI: health (M2), backups (M3), slow and workload (M4), access (M5)
 policy/      access-policy.toml: the approved accounts, their owners, and accepted risks
 tests/       unit tests (no databases needed) and live tests against the lab
-drills/      scripts that cause an incident on purpose (M7)
+drills/      scripts that cause an incident on purpose, then fix and clean it up (M7)
 terraform/   the Linux host db-vm1: image, network, disks, ports (M6)
 ansible/     inventory, playbooks and roles that turn db-vm1 into a database server (M6)
 docs/        RUNBOOK.md, plus incidents/ for postmortems
